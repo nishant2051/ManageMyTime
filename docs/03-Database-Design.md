@@ -14,7 +14,7 @@ Use IndexedDB with schema version 1 and typed repository adapters. Keep business
 
 | Store | Key / fields | Rules |
 | --- | --- | --- |
-| tasks | UUID; name, type, lifecycleStatus, notes, optional progressPercent, confirmation policy, createdAt/updatedAt/completedAt/archivedAt | Trimmed name 1–200 characters; duplicate names allowed; progress 0–100; completed tasks do not restart. |
+| tasks | UUID; name, type, status, revision, notes, optional progressPercent, confirmation policy, createdAt/updatedAt/completedAt/archivedAt | Trimmed name 1–200 characters; duplicate names allowed; progress 0–100; completed tasks do not restart. |
 | workSessions | UUID; taskId, startedAt, endedAt nullable, creationSource, wasCorrected, endReason, timezone, createdAt/updatedAt | Required task; nonnegative ended interval; no overlapping sessions globally; at most one open session. |
 | activeSession | Singleton key; sessionId, ownerId, generation, owner lease/checkpoint | Transactional guard; owner lease indicates liveness, never proven work. |
 | recovery | Singleton key; sessionId, lastRuntimeCheckpointAt, lastUserConfirmedAt, pendingPrompt boundary/context | Resolve orphaned sessions without inventing time; remove after committed resolution. |
@@ -45,3 +45,7 @@ Schema upgrades run in version-change transactions. Test old-schema fixtures, ha
 JSON: exportVersion, exportedAt, tasks, workSessions, timeBlocks, todos and settings. Include interrupted/open sessions with explicit state; do not export ephemeral owner tokens as portable business data. Stable DTOs are independent of IndexedDB internals. CSV columns: session_id, task_id, task_name, started_at, ended_at, timezone, duration_seconds, creation_source, was_corrected, end_reason. Escape CSV cells safely, including formula-like values.
 
 Exports require a user action; no automatic uploads. Confirm permanent deletion/reset and show affected history. Reset removes business stores, recovery and preferences consistently and informs other open tabs. Import/restore and automated backup are deferred.
+
+## F01 implementation baseline
+
+Schema V1 currently creates only the tasks store and its status index. Other stores above are planned; add them with explicit version upgrades in their feature slices. Task revisions increment on committed changes and prevent stale overwrites. Task defaults are currently supplied by the composition/service layer; a user-editable persisted defaults surface is F13.

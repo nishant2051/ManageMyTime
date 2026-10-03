@@ -4,16 +4,16 @@
 
 **Scope:** Local-first web MVP; React + TypeScript + Vite; IndexedDB
 
-**Current feature in progress:** None; documentation migration completed
+**Current feature in progress:** None; F01 completed
 
-**Recommended next step:** F01 — Persistent task management
+**Recommended next step:** F02 — Manual work-session tracking
 
 ## Current implementation status
 
-- **Implemented product features:** None.
+- **Implemented product features:** F01 — Persistent task management.
 - **In progress product features:** None.
 - **Completed planning:** Web scope, architecture, persistence, component boundaries, tracking rules, UX, privacy and tracker revised.
-- **Implemented foundation:** React/TypeScript/Vite scaffold and responsive welcome screen.
+- **Implemented foundation:** React/TypeScript/Vite scaffold, task domain/service, IndexedDB Schema V1 and Tasks interface.
 - **Current blocker:** None. Node 24.4.1/npm 11.4.2 verified; web production build, type check, lint and browser smoke checks pass.
 
 The active project is web-only. Desktop source, packaging files, generated Swift build output and archived desktop specifications were removed at the user’s request.
@@ -51,7 +51,7 @@ Build one feature at a time. Update this file before moving on. Code presence is
 | M01 | Web documentation migration | Implemented | User-approved direction | Seven active specs and tracker revised; desktop specifications removed; no native toolchain dependency. Evidence: these documents and change log. |
 | W00 | Web scaffold | Implemented | M01 | React/TypeScript/Vite app launches locally; production build, type check and lint pass; logical layers, accessible welcome screen and setup README. Root project contains only the active web scaffold. |
 | T00 | Browser feasibility checks | Queued | W00 | Probe IndexedDB commits/abort, simultaneous tabs, owner death, suspension/reload, migrations, quota failure and offline shell. Run each check before relying on that capability; record browser results. |
-| F01 | Persistent tasks | Queued | W00; storage T00 | Create/list/edit/complete/archive; three types, notes, optional progress and editable confirmation defaults; filters; reload restores data; save failures honest. |
+| F01 | Persistent tasks | Implemented | W00; storage T00 | Create/list/edit/complete/archive; three types, notes, optional progress and editable confirmation defaults; filters; reload restores data; save failures honest. |
 | F02 | Manual sessions | Queued | F01; multi-tab T00 | Start/Pause/Resume/Done/Switch; one open session across same-origin tabs; committed transaction before success; live elapsed display and basic history; no overlaps. |
 | F03 | Interrupted-session recovery | Queued | F02; lifecycle T00 | Orphaned/suspended runtime enters recovery; live second-tab owner not incorrectly recovered; defensible boundary/user correction; no silent resume or invented downtime. |
 | F04 | In-app prompt coordination | Queued | F03 | One actionable prompt, stale IDs/generations ignored, collision precedence, no guaranteed closed-tab/background delivery. |
@@ -85,12 +85,12 @@ Do not implement tasks, sessions, IndexedDB business stores or full navigation a
 
 ## F01 — Persistent tasks, broken into steps
 
-1. Domain task/type/lifecycle and confirmation policy: trimmed name 1–200, optional progress 0–100, valid enabled intervals, duplicate names allowed.
-2. Versioned IndexedDB schema and typed task repository; transaction completion determines save success.
-3. TaskService create/edit/complete/archive; validation outside UI; stable UUID/timestamps; defaults copied at creation.
-4. Task list and editor with filters, empty/error states and accessible controls. Do not expose Start until F02.
-5. Domain and browser persistence checks: reload, failed saves, lifecycle/default isolation, invalid inputs and schema upgrades.
-6. Record source/validation evidence; mark implemented only after acceptance passes.
+- [x] Domain task/type/lifecycle and confirmation policy: trimmed name 1–200, optional progress 0–100, valid enabled intervals, duplicate names allowed.
+- [x] Versioned IndexedDB schema and typed task repository; transaction completion determines save success.
+- [x] TaskService create/edit/complete/archive; validation outside UI; stable UUID/timestamps; defaults copied at creation.
+- [x] Task list and editor with filters, empty/error states and accessible controls. Do not expose Start until F02.
+- [x] Domain and browser persistence checks: reload, failed saves, lifecycle/default isolation, invalid inputs and schema upgrades.
+- [x] Record source/validation evidence; mark implemented only after acceptance passes.
 
 ## F02–F03 — Tracking foundation
 
@@ -122,10 +122,24 @@ Open implementation decisions: dependency versions; supported browser versions; 
 ### W00 evidence — 2026-10-04
 
 - Runtime: Node 24.4.1, npm 11.4.2; React 19.3.0, Vite 8.3.2 and plugin-react 6.1.1. Exact installed dependencies are locked in [package-lock.json](../package-lock.json).
-- Source/configuration: [package.json](../package.json), [app composition](../src/app/environment.ts), [app entry](../src/main.tsx), [welcome screen](../src/presentation/WelcomeScreen.tsx), [styles](../src/presentation/styles.css).
+- Source/configuration: [package.json](../package.json), [app composition](../src/app/environment.ts), [app entry](../src/main.tsx), [current Tasks screen](../src/presentation/TasksScreen.tsx) (replaced the initial welcome screen in F01), [styles](../src/presentation/styles.css).
 - Passed: `npm run build` (includes `npm run typecheck`), `npm run lint`; npm installation audit reported zero vulnerabilities.
 - Browser smoke: welcome heading and expected content rendered at `http://127.0.0.1:5173/`; visual desktop/default and 375px narrow-screen inspection; document width equaled viewport width at 375px. No application business tests are appropriate yet. Full browser/screen-reader matrix remains F15.
 - Scope: no tasks, sessions, business persistence, service worker or deployment added. Development preview remains available while its server runs.
 - Next: F01 persistent task management; T00 storage validation before relying on IndexedDB.
 
 - Cleanup: Removed desktop source, native packaging/resources, archived desktop specs and `.build` output at the user’s request. Revalidated web build, lint and local document links before commit.
+
+### F01 evidence — 2026-10-04
+
+- Completed smaller steps: task domain/validation; IndexedDB Schema V1 repository; create/edit/complete/archive service; Tasks list/editor with filters and empty/error states; automated verification; tracker update.
+- Source: [domain models](../src/domain/task.ts), [service](../src/application/taskService.ts), [IndexedDB adapter](../src/persistence/taskRepository.ts), [Tasks screen](../src/presentation/TasksScreen.tsx), [editor](../src/presentation/TaskEditor.tsx).
+- Validation: production build/type check and lint pass; 18 domain/repository tests and 6 Chromium browser tests pass. Coverage includes reload persistence, duplicate names, validation, default isolation, timestamps, archived-edit rejection, aborted transactions, unavailable storage, stale edits across tabs, dialog focus and narrow-screen layout.
+- Tests: [domain/repository tests](../src/application/taskService.test.ts), [browser tests](../tests/tasks.spec.ts). Real-browser storage probes for F01 passed; T00 remains queued for session ownership, lifecycle, migration fixtures, quota and offline checks in later slices.
+- Manual visual inspection: Tasks empty state and modal editor rendered correctly in local preview. Browser tests use isolated storage and do not leave sample records in the user's profile.
+- Limits: user-editable global defaults/settings remain F13; confirmation values are saved preferences only, no reminder runtime exists yet. No Start/Pause/Resume or permanent delete/export controls added. Full browser matrix remains F15.
+- User reviewed and approved F01. Publication: commit and push authorized; F02 remains queued.
+
+### F01 review — 2026-10-04
+
+User approved the completed task-management feature and authorized committing/pushing it. All six F01 steps are complete; validation evidence is recorded above. F02 remains queued.

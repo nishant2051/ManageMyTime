@@ -1,3 +1,3 @@
 # domain
 
-Reserved for the corresponding layer as its feature slices are implemented. No business implementation exists yet.
+Task models, defaults, validation and repository contracts are framework independent. Session models and rules will follow in F02.

@@ -1,0 +1,93 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { AppEnvironment } from '../app/environment'
+import type { TaskInput, TaskStatus, WorkTask } from '../domain/task'
+import { typeLabels } from '../domain/task'
+import { TaskEditor } from './TaskEditor'
+
+const filters: {value: TaskStatus; label: string}[] = [
+  {value: 'ready', label: 'Active'}, {value: 'completed', label: 'Completed'}, {value: 'archived', label: 'Archived'},
+]
+export function TasksScreen({ environment }: {environment: AppEnvironment}) {
+  const [tasks, setTasks] = useState<WorkTask[]>([])
+  const [filter, setFilter] = useState<TaskStatus>('ready')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState<string | null>(null)
+  const [editor, setEditor] = useState<{task: WorkTask | null} | null>(null)
+  const sequence = useRef({value: 0})
+  const opener = useRef<HTMLButtonElement | null>(null)
+  const defaults = environment.tasks.creationDefaults()
+
+  const reload = useCallback(async () => {
+    const request = ++sequence.current.value
+    setLoading(true)
+    try {
+      const records = await environment.tasks.list()
+      if (request === sequence.current.value) { setTasks(records); setError('') }
+    } catch (cause) {
+      if (request === sequence.current.value) setError(cause instanceof Error ? cause.message : 'Tasks could not be loaded.')
+    } finally { if (request === sequence.current.value) setLoading(false) }
+  }, [environment])
+  useEffect(() => {
+    const counter = sequence.current
+    // Reconcile other-tab updates on focus/visibility; database revisions guard edits.
+    const refresh = () => { void reload() }
+    const visible = () => { if (document.visibilityState === 'visible') refresh() }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', visible)
+    refresh()
+    return () => {
+      counter.value++
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', visible)
+    }
+  }, [reload])
+  function openEditor(task: WorkTask | null, button: HTMLButtonElement) {
+    opener.current = button; setNotice(''); setEditor({task})
+  }
+  useEffect(() => {
+    if (!editor && !loading && opener.current) {
+      opener.current.focus()
+      opener.current = null
+    }
+  }, [editor, loading])
+  function closeEditor() { setEditor(null) }
+  async function save(input: TaskInput) {
+    if (editor?.task) await environment.tasks.edit(editor.task, input)
+    else await environment.tasks.create(input)
+    setNotice(editor?.task ? 'Changes saved.' : 'Task created.')
+    closeEditor()
+    await reload()
+  }
+  async function action(task: WorkTask, kind: 'complete' | 'archive') {
+    setBusy(task.id); setNotice(''); setError('')
+    try {
+      await environment.tasks[kind](task)
+      setNotice(kind === 'complete' ? 'Task completed.' : 'Task archived. Its details are preserved.')
+      await reload()
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Changes could not be saved.') }
+    finally { setBusy(null) }
+  }
+  const shown = tasks.filter(task => task.status === filter).sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
+  return (
+    <div className="app-shell">
+      <header className="app-header"><span className="brand-icon" aria-hidden="true">m</span><span className="brand-name">{environment.appName}</span><span className="version">Your personal workspace</span></header>
+      <main className="tasks-main">
+        <section className="tasks-workspace" aria-labelledby="tasks-title">
+          <div className="page-heading"><div><p className="eyebrow">Make room for what matters</p><h1 id="tasks-title">Tasks</h1><p className="intro">Keep your ongoing work in one place.</p></div><button className="primary" disabled={loading || !!error} onClick={e => openEditor(null, e.currentTarget)}>Create task</button></div>
+          <div className="list-toolbar"><div className="filters" aria-label="Task filters">{filters.map(item => <button key={item.value} aria-pressed={filter === item.value} onClick={() => {setFilter(item.value); setNotice('')}}>{item.label} <span>{tasks.filter(task => task.status === item.value).length}</span></button>)}</div><button className="quiet" onClick={() => {void reload()}} disabled={loading}>Refresh list</button></div>
+          <p className="status-message" role="status">{loading ? 'Loading tasks…' : notice}</p>
+          {error && <div className="error" role="alert"><p>{error}</p><button onClick={() => {void reload()}}>Retry loading</button></div>}
+          {!loading && !error && shown.length === 0 && <div className="empty-state"><h2>{filter === 'ready' ? 'Your next project starts here.' : `No ${filter} tasks yet.`}</h2><p>{filter === 'ready' ? 'Create a task for something you want to work on. Notes and progress are optional.' : `Tasks you ${filter === 'completed' ? 'complete' : 'archive'} will appear here.`}</p></div>}
+          <ul className="task-list">{shown.map(task => <li key={task.id} className="task-card">
+            <div className="task-content"><div className="task-meta"><span>{typeLabels[task.type]}</span><span className="task-state">{task.status === 'ready' ? 'Active' : task.status === 'completed' ? 'Completed' : 'Archived'}</span></div><h2>{task.name}</h2>{task.notes && <p className="task-notes">{task.notes}</p>}<div className="task-details">{task.progressPercent !== null && <span>Progress: {task.progressPercent}%</span>}<span>{task.confirmation.enabled ? `Confirmation preference: every ${task.confirmation.intervalMinutes} min` : 'Confirmation preference: off'}</span>{task.completedAt && <span>Completed {new Date(task.completedAt).toLocaleDateString()}</span>}{task.archivedAt && <span>Archived {new Date(task.archivedAt).toLocaleDateString()}</span>}</div></div>
+            {task.status !== 'archived' && <div className="task-actions"><button disabled={busy !== null} onClick={e => openEditor(task, e.currentTarget)} aria-label={`Edit ${task.name}`}>Edit</button>{task.status === 'ready' && <button disabled={busy !== null} onClick={() => {void action(task, 'complete')}} aria-label={`Complete ${task.name}`}>Complete</button>}<button disabled={busy !== null} onClick={() => {void action(task, 'archive')}} aria-label={`Archive ${task.name}`}>Archive</button></div>}
+          </li>)}</ul>
+          <aside className="storage-note"><strong>Saved in this browser.</strong> Tasks stay on this device and site. Clearing site data can remove them. Time tracking, reminders and export are coming in later steps.</aside>
+        </section>
+      </main>
+      {editor && <TaskEditor task={editor.task} defaults={defaults} onSave={save} onDismiss={closeEditor} />}
+    </div>
+  )
+}

@@ -1,6 +1,6 @@
 import type { AppEnvironment } from './environment'
-import { WelcomeScreen } from '../presentation/WelcomeScreen'
+import { TasksScreen } from '../presentation/TasksScreen'
 
 export function App({ environment }: { environment: AppEnvironment }) {
-  return <WelcomeScreen appName={environment.appName} />
+  return <TasksScreen environment={environment} />
 }
