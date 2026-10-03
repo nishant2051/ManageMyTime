@@ -1,0 +1,34 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #17213c;
+  background: #f5f7fc;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 280px; }
+.app-shell { min-height: 100svh; display: flex; flex-direction: column; }
+.app-header { display: flex; align-items: center; gap: 12px; padding: 24px 5vw; border-bottom: 1px solid #dee4f0; background: #fff; }
+.brand-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: #173cdb; color: #fff; font-size: 25px; font-weight: 700; }
+.brand-name { font-weight: 700; font-size: 1.125rem; }
+.version { margin-left: auto; color: #526078; font-size: .875rem; }
+main { flex: 1; display: flex; align-items: center; padding: 72px 24px; }
+.welcome { width: min(100%, 820px); margin-inline: auto; }
+.eyebrow { color: #173cdb; font-weight: 650; font-size: .9375rem; margin: 0 0 20px; }
+h1 { font-size: clamp(2rem, 4.5vw, 3.5rem); line-height: 1.16; letter-spacing: -.035em; margin: 0; }
+.intro { color: #526078; font-size: 1.125rem; line-height: 1.7; max-width: 580px; margin: 24px 0 40px; }
+.next-feature { display: flex; gap: 24px; padding: 28px; background: #fff; border: 1px solid #dee4f0; border-radius: 16px; }
+.step-number { color: #173cdb; font-size: 1.375rem; font-weight: 600; padding-top: 1px; }
+.feature-label { color: #526078; font-size: .875rem; margin: 0 0 8px; }
+h2 { font-size: 1.5rem; margin: 0 0 10px; }
+.next-feature p:last-child { color: #526078; line-height: 1.6; margin: 0; }
+.availability { color: #526078; font-size: .875rem; line-height: 1.6; margin-top: 20px; }
+footer { padding: 24px 5vw; border-top: 1px solid #dee4f0; color: #526078; font-size: .875rem; line-height: 1.6; }
+@media (max-width: 600px) {
+  .app-header { flex-wrap: wrap; padding: 20px; }
+  .version { flex-basis: 100%; margin-left: 48px; }
+  main { padding: 48px 20px; }
+  .desktop-break { display: none; }
+  .next-feature { gap: 16px; padding: 20px; }
+}
