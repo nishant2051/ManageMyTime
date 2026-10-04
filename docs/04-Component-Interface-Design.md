@@ -41,3 +41,11 @@ Errors distinguish validation, conflict/stale event, recoveryRequired, storageUn
 Domain/engine tests use fake clocks/repositories. Browser integration tests exercise actual IndexedDB commit/abort, concurrent tabs, owner death, reload, upgrades and storage failures. Prompt tests cover stale responses and planner collisions. Query tests cover corrected records, cross-midnight and DST ranges. UI checks include keyboard navigation and accurate capability/error messages.
 
 No native adapter is required by the web MVP.
+
+## F02.2 implementation baseline
+
+SessionEngine is constructed in the app composition root with BrowserClock and IndexedDBSessionReader. It explicitly reconciles committed session evidence, serializes dispatch/observations, exposes immutable subscription snapshots and rejects unsupported production commands. SessionCommandHandler defines the transaction-commit boundary; the production writer follows in F02.3. Runtime timing thresholds are recorded in [Decision 001](decisions/001-runtime-clock-foundation.md). The engine contains no timer intervals or lifecycle listeners yet.
+
+## F02.3 implementation baseline
+
+The composition root now injects IndexedDBSessionCommands into SessionEngine. Start/Pause/Resume resolve only after the combined tasks/session/marker/recovery transaction commits. Domain-safe typed errors preserve conflict/stale-action classification through the engine. TaskService completion in the production composition dispatches Complete through the engine with expected task revision and session identity/generation. Switch uses the same transaction scope. Direct repository lifecycle updates still refuse changes to running tasks; archive requires pausing first. A disposable browser coordinator reconciles committed change hints, polls every 15 seconds and dispatches owner checkpoints for a healthy running engine. F02.6 subscribes the Tasks UI to committed session snapshots, observes monotonic elapsed once per second and reads validated history. Start/Resume/Switch and Pause/Done route through the engine; recovery actions remain F03.

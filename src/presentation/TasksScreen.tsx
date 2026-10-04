@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppEnvironment } from '../app/environment'
 import type { TaskInput, TaskStatus, WorkTask } from '../domain/task'
 import { typeLabels } from '../domain/task'
+import { TrackingPanel, SessionHistory } from './TrackingPanel'
+import { useSessionTracking } from './useSessionTracking'
+import { workedTotal, formatDuration } from './sessionDisplay'
+import type { SessionCommand } from '../domain/sessionStore'
 import { TaskEditor } from './TaskEditor'
 
 const filters: {value: TaskStatus; label: string}[] = [
@@ -17,6 +21,10 @@ export function TasksScreen({ environment }: {environment: AppEnvironment}) {
   const [editor, setEditor] = useState<{task: WorkTask | null} | null>(null)
   const sequence = useRef({value: 0})
   const opener = useRef<HTMLButtonElement | null>(null)
+  const tracking = useSessionTracking(environment)
+  const session = tracking.snapshot.records.session
+  const mode = tracking.snapshot.mode
+  const canTrack = (mode === 'idle' || mode === 'running') && !tracking.loading && !tracking.error && !loading && !error
   const defaults = environment.tasks.creationDefaults()
 
   const reload = useCallback(async () => {
@@ -36,13 +44,42 @@ export function TasksScreen({ environment }: {environment: AppEnvironment}) {
     const visible = () => { if (document.visibilityState === 'visible') refresh() }
     window.addEventListener('focus', refresh)
     document.addEventListener('visibilitychange', visible)
+    let sessionKey = ''
+    const sessionChanged = () => {
+      const state = environment.sessions.getSnapshot()
+      const key = `${state.mode}:${state.records.session?.id ?? ''}`
+      if (key !== sessionKey) { sessionKey = key; refresh() }
+    }
+    const unsubscribe = environment.sessions.subscribe(sessionChanged)
     refresh()
     return () => {
+      unsubscribe()
       counter.value++
       window.removeEventListener('focus', refresh)
       document.removeEventListener('visibilitychange', visible)
     }
-  }, [reload])
+  }, [reload, environment])
+
+  async function track(command: SessionCommand, taskId: string) {
+    setBusy(taskId); setNotice(''); setError('')
+    try {
+      await environment.sessions.dispatch(command)
+      setNotice(command.type === 'pause' ? 'Session paused and saved.' : command.type === 'switch' ? 'Switched tasks. Previous session saved.' : 'Session started.')
+      await tracking.reload()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Session changes could not be saved.')
+      // Reconcile stale/foreign state, but retain the original failed-save message.
+      await environment.sessions.reconcile().catch(() => undefined)
+    } finally { setBusy(null) }
+  }
+  function pause() {
+    if (session && tracking.snapshot.records.active) void track({type:'pause',sessionId:session.id,generation:tracking.snapshot.records.active.generation},session.taskId)
+  }
+  function startTask(task: WorkTask) {
+    const active = tracking.snapshot.records.active
+    if (mode === 'running' && session && active) void track({type:'switch',sessionId:session.id,generation:active.generation,taskId:task.id},task.id)
+    else void track({type:tracking.history.some(item => item.taskId === task.id && item.endedAt !== null && item.creationSource === 'tracked') ? 'resume' : 'start',taskId:task.id},task.id)
+  }
   function openEditor(task: WorkTask | null, button: HTMLButtonElement) {
     opener.current = button; setNotice(''); setEditor({task})
   }
@@ -65,7 +102,7 @@ export function TasksScreen({ environment }: {environment: AppEnvironment}) {
     try {
       await environment.tasks[kind](task)
       setNotice(kind === 'complete' ? 'Task completed.' : 'Task archived. Its details are preserved.')
-      await reload()
+      await Promise.all([reload(),tracking.reload()])
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Changes could not be saved.') }
     finally { setBusy(null) }
   }
@@ -76,15 +113,17 @@ export function TasksScreen({ environment }: {environment: AppEnvironment}) {
       <main className="tasks-main">
         <section className="tasks-workspace" aria-labelledby="tasks-title">
           <div className="page-heading"><div><p className="eyebrow">Make room for what matters</p><h1 id="tasks-title">Tasks</h1><p className="intro">Keep your ongoing work in one place.</p></div><button className="primary" disabled={loading || !!error} onClick={e => openEditor(null, e.currentTarget)}>Create task</button></div>
+          <TrackingPanel snapshot={tracking.snapshot} history={tracking.history} tasks={tasks} loading={tracking.loading} busy={busy !== null} error={error ? '' : tracking.error} onPause={pause} onComplete={task => {void action(task,'complete')}} onRefresh={() => {void tracking.refresh()}} />
           <div className="list-toolbar"><div className="filters" aria-label="Task filters">{filters.map(item => <button key={item.value} aria-pressed={filter === item.value} onClick={() => {setFilter(item.value); setNotice('')}}>{item.label} <span>{tasks.filter(task => task.status === item.value).length}</span></button>)}</div><button className="quiet" onClick={() => {void reload()}} disabled={loading}>Refresh list</button></div>
           <p className="status-message" role="status">{loading ? 'Loading tasks…' : notice}</p>
           {error && <div className="error" role="alert"><p>{error}</p><button onClick={() => {void reload()}}>Retry loading</button></div>}
-          {!loading && !error && shown.length === 0 && <div className="empty-state"><h2>{filter === 'ready' ? 'Your next project starts here.' : `No ${filter} tasks yet.`}</h2><p>{filter === 'ready' ? 'Create a task for something you want to work on. Notes and progress are optional.' : `Tasks you ${filter === 'completed' ? 'complete' : 'archive'} will appear here.`}</p></div>}
+          {!loading && !error && shown.length === 0 && <div className="empty-state"><h2>{filter === 'ready' ? 'Your next project starts here.' : `No ${filter} tasks yet.`}</h2><p>{filter === 'ready' ? 'Create a task for something you want to work on. Notes and previously worked hours are optional.' : `Tasks you ${filter === 'completed' ? 'complete' : 'archive'} will appear here.`}</p></div>}
           <ul className="task-list">{shown.map(task => <li key={task.id} className="task-card">
-            <div className="task-content"><div className="task-meta"><span>{typeLabels[task.type]}</span><span className="task-state">{task.status === 'ready' ? 'Active' : task.status === 'completed' ? 'Completed' : 'Archived'}</span></div><h2>{task.name}</h2>{task.notes && <p className="task-notes">{task.notes}</p>}<div className="task-details">{task.progressPercent !== null && <span>Progress: {task.progressPercent}%</span>}<span>{task.confirmation.enabled ? `Confirmation preference: every ${task.confirmation.intervalMinutes} min` : 'Confirmation preference: off'}</span>{task.completedAt && <span>Completed {new Date(task.completedAt).toLocaleDateString()}</span>}{task.archivedAt && <span>Archived {new Date(task.archivedAt).toLocaleDateString()}</span>}</div></div>
-            {task.status !== 'archived' && <div className="task-actions"><button disabled={busy !== null} onClick={e => openEditor(task, e.currentTarget)} aria-label={`Edit ${task.name}`}>Edit</button>{task.status === 'ready' && <button disabled={busy !== null} onClick={() => {void action(task, 'complete')}} aria-label={`Complete ${task.name}`}>Complete</button>}<button disabled={busy !== null} onClick={() => {void action(task, 'archive')}} aria-label={`Archive ${task.name}`}>Archive</button></div>}
+            <div className="task-content"><div className="task-meta"><span>{typeLabels[task.type]}</span><span className="task-state">{task.status === 'ready' ? 'Active' : task.status === 'completed' ? 'Completed' : 'Archived'}</span></div><h2>{task.name}</h2>{task.notes && <p className="task-notes">{task.notes}</p>}<div className="task-details"><span>{task.confirmation.enabled ? `Periodic confirmation: every ${task.confirmation.intervalMinutes} min` : 'Periodic confirmation: off'}</span><span>Inactivity check: after {task.confirmation.inactivityMinutes} min · Grace: {task.confirmation.graceMinutes} min</span>{!tracking.loading && !tracking.error && <span>Hours worked: {formatDuration(workedTotal(task,tracking.history,tracking.snapshot))}</span>}{task.completedAt && <span>Completed {new Date(task.completedAt).toLocaleDateString()}</span>}{task.archivedAt && <span>Archived {new Date(task.archivedAt).toLocaleDateString()}</span>}</div></div>
+            {task.status !== 'archived' && <div className="task-actions">{task.status === 'ready' && session?.taskId !== task.id && <button className="primary" disabled={busy !== null || !canTrack} onClick={() => startTask(task)} aria-label={`${mode === 'running' ? 'Switch to' : tracking.history.some(item => item.taskId === task.id && item.endedAt !== null && item.creationSource === 'tracked') ? 'Resume' : 'Start'} ${task.name}`}>{mode === 'running' ? 'Switch to' : tracking.history.some(item => item.taskId === task.id && item.endedAt !== null && item.creationSource === 'tracked') ? 'Resume' : 'Start'}</button>}<button disabled={busy !== null} onClick={e => openEditor(task, e.currentTarget)} aria-label={`Edit ${task.name}`}>Edit</button>{task.status === 'ready' && <button disabled={busy !== null || mode === 'uninitialized' || mode === 'recoveryRequired' || (session?.taskId === task.id && mode !== 'running')} onClick={() => {void action(task, 'complete')}} aria-label={`Complete ${task.name}`}>Complete</button>}<button disabled={busy !== null || session?.taskId === task.id} onClick={() => {void action(task, 'archive')}} aria-label={`Archive ${task.name}`}>Archive</button></div>}
           </li>)}</ul>
-          <aside className="storage-note"><strong>Saved in this browser.</strong> Tasks stay on this device and site. Clearing site data can remove them. Time tracking, reminders and export are coming in later steps.</aside>
+          <SessionHistory history={tracking.history} tasks={tasks} loading={tracking.loading} error={tracking.error} />
+          <aside className="storage-note"><strong>Saved in this browser.</strong> Tasks stay on this device and site. Clearing site data can remove them. Sessions stay here too. Reminders, recovery actions and export are coming in later steps.</aside>
         </section>
       </main>
       {editor && <TaskEditor task={editor.task} defaults={defaults} onSave={save} onDismiss={closeEditor} />}

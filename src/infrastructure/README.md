@@ -1,3 +1,3 @@
 # infrastructure
 
-Reserved for the corresponding layer as its feature slices are implemented. No business implementation exists yet.
+BrowserClock supplies wall and runtime monotonic samples. Ownership coordination, lifecycle adapters, periodic observations and recovery integration follow in later tracking slices.

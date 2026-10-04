@@ -1,0 +1,142 @@
+import { test, expect, type Page } from '@playwright/test'
+
+async function createTask(page: Page, name: string) {
+  await page.getByRole('button',{name:'Create task',exact:true}).click()
+  await page.getByLabel('Task name').fill(name)
+  await page.getByRole('dialog').getByRole('button',{name:'Create task',exact:true}).click()
+  await expect(page.getByRole('button',{name:`Start ${name}`,exact:true})).toBeEnabled()
+}
+
+test('visible controls start, pause, resume, switch and finish persisted sessions', async ({page})=>{
+  await page.goto('/')
+  await createTask(page,'Study')
+  await createTask(page,'Write')
+  await page.getByRole('button',{name:'Start Study',exact:true}).click()
+  const current=page.getByRole('region',{name:'Current session'})
+  const history=page.getByRole('region',{name:'Session history'})
+  await expect(current).toContainText('Tracking in this tab')
+  await expect.poll(()=>current.locator('.timer').innerText()).not.toBe('00:00:00')
+  await page.getByRole('button',{name:'Pause Study',exact:true}).click()
+  await expect(history).toContainText('Paused')
+  await expect(current).toContainText('Ready when you are')
+  await expect(page.getByRole('button',{name:'Resume Study',exact:true})).toBeEnabled()
+  await page.getByRole('button',{name:'Resume Study',exact:true}).click()
+  await page.getByRole('button',{name:'Switch to Write',exact:true}).click()
+  await expect(current.locator('.current-task')).toHaveText('Write')
+  await expect(history).toContainText('Switched task')
+  await page.getByRole('button',{name:'Done with Write',exact:true}).click()
+  await expect(current).toContainText('Ready when you are')
+  await expect(history).toContainText('Task completed')
+  await expect(history.locator('.session-row')).toHaveCount(3)
+  await page.reload()
+  await expect(history.locator('.session-row')).toHaveCount(3)
+  await page.getByRole('button',{name:/^Completed/}).click()
+  await expect(page.getByRole('heading',{name:'Write',exact:true})).toBeVisible()
+  await expect(page.getByRole('button',{name:'Start Write',exact:true})).toHaveCount(0)
+})
+
+test('another tab shows a read-only follower and follows Pause', async ({page,context})=>{
+  await page.goto('/')
+  await createTask(page,'Shared work')
+  await page.getByRole('button',{name:'Start Shared work',exact:true}).click()
+  const other=await context.newPage();await other.goto('/')
+  const current=other.getByRole('region',{name:'Current session'})
+  await expect(current).toContainText('Tracking in another tab')
+  await expect(current).toContainText('Elapsed time unavailable')
+  await expect(other.getByRole('button',{name:'Pause Shared work',exact:true})).toHaveCount(0)
+  await expect(other.getByRole('button',{name:'Complete Shared work',exact:true})).toBeDisabled()
+  await page.getByRole('button',{name:'Pause Shared work',exact:true}).click()
+  await expect(current).toContainText('Ready when you are')
+  await expect(other.getByRole('button',{name:'Resume Shared work',exact:true})).toBeEnabled()
+})
+
+test('reload preserves open history without inventing live elapsed time', async ({page})=>{
+  await page.goto('/')
+  await createTask(page,'Interrupted work')
+  await page.getByRole('button',{name:'Start Interrupted work',exact:true}).click()
+  await expect(page.getByRole('region',{name:'Current session'})).toContainText('Tracking in this tab')
+  await page.reload()
+  // Reload creates a new owner. Until expiry, the previous lease is still followed.
+  await expect(page.getByRole('region',{name:'Current session'})).toContainText('Elapsed time unavailable')
+  const history=page.getByRole('region',{name:'Session history'})
+  await expect(history).toContainText('Duration pending')
+  await expect(history).toContainText('Recorded total: 00:00:00')
+  await expect(page.getByRole('button',{name:'Complete Interrupted work',exact:true})).toBeDisabled()
+})
+
+test('failed Pause keeps controls and open history without reporting success', async ({page})=>{
+  await page.goto('/')
+  await createTask(page,'Save failure')
+  await page.getByRole('button',{name:'Start Save failure',exact:true}).click()
+  await page.evaluate(()=>{
+    const original=IDBObjectStore.prototype.delete
+    IDBObjectStore.prototype.delete=function(key) {
+      const request=original.call(this,key)
+      if(this.name==='recovery') this.transaction.abort()
+      return request
+    }
+  })
+  await page.getByRole('button',{name:'Pause Save failure',exact:true}).click()
+  await expect(page.getByRole('alert')).toContainText('not saved')
+  await expect(page.getByRole('button',{name:'Pause Save failure',exact:true})).toBeEnabled()
+  await expect(page.getByRole('region',{name:'Session history'})).toContainText('Duration pending')
+  await expect(page.getByRole('status').filter({hasText:'Session paused and saved.'})).toHaveCount(0)
+})
+
+test('tracking and history remain usable on a narrow viewport', async ({page})=>{
+  await page.setViewportSize({width:375,height:812})
+  await page.goto('/')
+  await createTask(page,'A very long task name '.repeat(8))
+  await page.getByRole('button',{name:/^Start A very long/}).click()
+  await expect(page.getByRole('region',{name:'Current session'})).toContainText('Tracking in this tab')
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(375)
+  await page.screenshot({path:'/tmp/manage-my-time-tracking-mobile.png',fullPage:true})
+})
+
+test('expired ownership shows recovery evidence and prevents new tracking', async ({page})=>{
+  await page.goto('/')
+  await createTask(page,'Recover me')
+  await createTask(page,'Next task')
+  await page.getByRole('button',{name:'Start Recover me',exact:true}).click()
+  await expect(page.getByRole('region',{name:'Current session'})).toContainText('Tracking in this tab')
+  await page.evaluate(async ()=>{
+    const db=await new Promise<IDBDatabase>(resolve=>{
+      const request=indexedDB.open('manage-my-time');request.onsuccess=()=>resolve(request.result)
+    })
+    await new Promise<void>((resolve,reject)=>{
+      const tx=db.transaction('activeSession','readwrite');const store=tx.objectStore('activeSession');const request=store.get('active')
+      request.onsuccess=()=>store.put({...request.result,leaseExpiresAt:request.result.lastRuntimeCheckpointAt+1})
+      tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error)
+    })
+    db.close()
+  })
+  await page.getByRole('button',{name:'Refresh tracking',exact:true}).click()
+  const current=page.getByRole('region',{name:'Current session'})
+  await expect(current).toContainText('Recovery required')
+  await expect(current).toContainText('Last runtime checkpoint:')
+  await expect(current).toContainText('Last user confirmation:')
+  await expect(current.getByRole('timer')).toHaveText('Elapsed time unavailable')
+  await expect(page.getByRole('button',{name:'Start Next task',exact:true})).toBeDisabled()
+  await expect(page.getByRole('button',{name:'Pause Recover me',exact:true})).toHaveCount(0)
+  await expect(page.getByRole('region',{name:'Session history'})).toContainText('Recorded total: 00:00:00')
+})
+
+ test('previous hours accumulate with live sessions and persist after pause and reload', async ({page}) => {
+  await page.goto('/')
+  await page.getByRole('button', {name:'Create task',exact:true}).click()
+  await page.getByLabel('Task name').fill('Existing project')
+  await page.getByLabel('Previously worked hours').fill('2.5')
+  await page.getByRole('dialog').getByRole('button', {name:'Create task',exact:true}).click()
+  await expect(page.getByText('Hours worked: 02:30:00', {exact:true})).toBeVisible()
+  await page.getByRole('button',{name:'Start Existing project',exact:true}).click()
+  await expect.poll(() => page.getByText(/Hours worked:/).innerText()).not.toBe('Hours worked: 02:30:00')
+  await page.getByRole('button',{name:'Pause Existing project',exact:true}).click()
+  await expect(page.getByRole('region',{name:'Current session'})).toContainText('Ready when you are')
+  await expect(page.getByRole('region',{name:'Session history'})).toContainText('Paused')
+  await expect(page.getByText(/Hours worked:/)).toBeVisible()
+  const total = await page.getByText(/Hours worked:/).innerText()
+  await page.reload()
+  await expect(page.getByText(total,{exact:true})).toBeVisible()
+  await page.getByRole('button',{name:'Edit Existing project',exact:true}).click()
+  await expect(page.getByLabel('Previously worked hours')).toHaveValue('2.5')
+})

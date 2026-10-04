@@ -5,8 +5,8 @@ import { IndexedDBTaskRepository } from '../persistence/taskRepository'
 import { initialTaskDefaults, validateTask } from '../domain/task'
 import type { TaskInput } from '../domain/task'
 
-const input: TaskInput = { name: '  Read a book  ', type: 'reading', notes: 'Chapter 1', progressPercent: null,
-  confirmation: { enabled: true, intervalMinutes: 30, graceMinutes: 0 } }
+const input: TaskInput = { name: '  Read a book  ', type: 'reading', notes: 'Chapter 1', previousHours: 0,
+  confirmation: { enabled: true, intervalMinutes: 30, inactivityMinutes:10, graceMinutes: 0 } }
 function setup() {
   const factory = new IDBFactory()
   const repository = new IndexedDBTaskRepository(factory)
@@ -15,15 +15,15 @@ function setup() {
   return { factory, repository, service }
 }
 describe('task validation', () => {
-  it('trims names, accepts optional progress and permits zero grace', () => {
+  it('trims names, accepts zero previous hours and permits zero grace', () => {
     expect(validateTask(input).name).toBe('Read a book')
-    expect(validateTask(input).progressPercent).toBeNull()
+    expect(validateTask(input).previousHours).toBe(0)
   })
   it.each([' ', 'x'.repeat(201)])('rejects invalid name %j', name => {
     expect(() => validateTask({ ...input, name })).toThrow('task name')
   })
-  it.each([-1, 101, 1.5, NaN])('rejects invalid progress %s', progressPercent => {
-    expect(() => validateTask({ ...input, progressPercent })).toThrow('Progress')
+  it.each([-1, NaN, Infinity])('rejects invalid hours %s', previousHours => {
+    expect(() => validateTask({ ...input, previousHours })).toThrow('hours')
   })
   it.each([0, -1, NaN, Infinity])('rejects invalid enabled interval %s', intervalMinutes => {
     expect(() => validateTask({ ...input, confirmation: { ...input.confirmation, intervalMinutes } })).toThrow('confirmation interval')
@@ -38,13 +38,13 @@ describe('persisted task lifecycle', () => {
     await service.create(input); await service.create(input)
     const records = await new IndexedDBTaskRepository(factory).list()
     expect(records).toHaveLength(2)
-    expect(records[0]).toMatchObject({name: 'Read a book', notes: 'Chapter 1', status: 'ready', progressPercent: null, confirmation: input.confirmation})
+    expect(records[0]).toMatchObject({name: 'Read a book', notes: 'Chapter 1', status: 'ready', previousHours: 0, confirmation: input.confirmation})
     expect(records[0].id).not.toBe(records[1].id)
   })
   it('edits, completes and archives while preserving completion timestamp and contents', async () => {
     const {service} = setup(); await service.create(input)
     let task = (await service.list())[0]
-    await service.edit(task, { ...input, progressPercent: 63, notes: 'Updated' })
+    await service.edit(task, { ...input, previousHours: 63, notes: 'Updated' })
     task = (await service.list())[0]; await service.complete(task)
     task = (await service.list())[0]
     expect(task.completedAt).not.toBeNull()
@@ -52,7 +52,7 @@ describe('persisted task lifecycle', () => {
     await expect(service.complete(task)).rejects.toThrow('Only active')
     await service.archive(task)
     task = (await service.list())[0]
-    expect(task).toMatchObject({status: 'archived', completedAt, notes: 'Updated', progressPercent: 63})
+    expect(task).toMatchObject({status: 'archived', completedAt, notes: 'Updated', previousHours: 63})
     expect(task.archivedAt).not.toBeNull()
     await expect(service.edit(task, input)).rejects.toThrow('Archived')
   })

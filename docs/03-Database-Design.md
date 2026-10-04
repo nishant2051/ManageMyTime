@@ -8,13 +8,13 @@
 
 ## Storage contract
 
-Use IndexedDB with schema version 1 and typed repository adapters. Keep business records in IndexedDB rather than localStorage. Request persistent storage when appropriate, handle refusal honestly, and explain that clearing site data/private browsing/browser eviction can affect records. Persistence is local to one origin/profile, not synchronization or a server backup.
+Use IndexedDB with schema version 2 and typed repository adapters. Keep business records in IndexedDB rather than localStorage. Request persistent storage when appropriate, handle refusal honestly, and explain that clearing site data/private browsing/browser eviction can affect records. Persistence is local to one origin/profile, not synchronization or a server backup.
 
 ## Stores
 
 | Store | Key / fields | Rules |
 | --- | --- | --- |
-| tasks | UUID; name, type, status, revision, notes, optional progressPercent, confirmation policy, createdAt/updatedAt/completedAt/archivedAt | Trimmed name 1–200 characters; duplicate names allowed; progress 0–100; completed tasks do not restart. |
+| tasks | UUID; name, type, status, revision, notes, previousHours starting balance, confirmation policy, createdAt/updatedAt/completedAt/archivedAt | Trimmed name 1–200 characters; duplicate names allowed; finite nonnegative previous hours; completed tasks do not restart. |
 | workSessions | UUID; taskId, startedAt, endedAt nullable, creationSource, wasCorrected, endReason, timezone, createdAt/updatedAt | Required task; nonnegative ended interval; no overlapping sessions globally; at most one open session. |
 | activeSession | Singleton key; sessionId, ownerId, generation, owner lease/checkpoint | Transactional guard; owner lease indicates liveness, never proven work. |
 | recovery | Singleton key; sessionId, lastRuntimeCheckpointAt, lastUserConfirmedAt, pendingPrompt boundary/context | Resolve orphaned sessions without inventing time; remove after committed resolution. |
@@ -46,6 +46,6 @@ JSON: exportVersion, exportedAt, tasks, workSessions, timeBlocks, todos and sett
 
 Exports require a user action; no automatic uploads. Confirm permanent deletion/reset and show affected history. Reset removes business stores, recovery and preferences consistently and informs other open tabs. Import/restore and automated backup are deferred.
 
-## F01 implementation baseline
+## Current implementation baseline
 
-Schema V1 currently creates only the tasks store and its status index. Other stores above are planned; add them with explicit version upgrades in their feature slices. Task revisions increment on committed changes and prevent stale overwrites. Task defaults are currently supplied by the composition/service layer; a user-editable persisted defaults surface is F13.
+Schema V1 created the tasks store and its status index. Schema V2 adds workSessions with taskId/startedAt indexes and singleton-keyed activeSession/recovery stores without rewriting tasks. TimeBlock, Todo and settings stores remain planned; add them with explicit version upgrades in their feature slices. Start/Pause/Resume now enforce the singleton/open-session invariant in transactions covering tasks, workSessions, activeSession and recovery. Marker/evidence writes or cleanup commit atomically with session changes. Complete/Switch now atomically update related records, with task revision and session identity/generation fences. Owner checkpoints renew the lease and recovery checkpoint atomically, guarded by identity/generation and unexpired ownership. Expiry requires explicit recovery. Task revisions increment on committed changes and prevent stale overwrites. Task defaults are currently supplied by the composition/service layer; a user-editable persisted defaults surface is F13.

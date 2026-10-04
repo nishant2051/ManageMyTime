@@ -15,7 +15,7 @@ Desktop sidebar with Dashboard, Tasks, Today, Planner, Timeline, Analytics and S
 | Screen | Required contents |
 | --- | --- |
 | Dashboard | Active task/type, session elapsed and Pause/Done; next block; today planned/actual and task breakdown. |
-| Tasks | Create/edit/list, type/notes/optional progress, confirmation options, Start/Resume/Complete/Archive; completed/archived filters. |
+| Tasks | Create/edit/list, type/notes/previously worked hours, confirmation options, Start/Resume/Complete/Archive; completed/archived filters. |
 | Today | Flat dated todos with completion, optional linked task, notes, progress, estimate and deadline. |
 | Planner | Day selection, task and break blocks, current-time marker, create/edit/delete; explicit boundary/overrun choices. |
 | Timeline | Actual sessions and clearly distinct plans; unknown gaps; detail, manual add/edit/delete/reassign with validation. |
@@ -43,3 +43,9 @@ Each feature supplies empty, loading, invalid-input and persistence-error states
 ## UI acceptance
 
 Complete one workflow at a time. Verify responsive layout, keyboard/screen-reader use, consistent committed tracking state, understandable recovery, accurate planned/actual distinction, explicit choices and absence of native-only capability claims. Full navigation polish follows the underlying features.
+
+## Current F02.6 delivery
+
+The Tasks workspace includes a current-session card, task-level Start/Resume/Switch and a basic session history below the list. Pause/Done use the current session identity; running-task archive is disabled. Live elapsed is a semantic timer without second-by-second screen-reader announcements. Ended-session totals exclude open intervals and pause gaps. History shows stored timezone, start/end, reason and duration.
+
+Follower tabs show read-only ownership and unknown elapsed. Uncertain sessions show start, last runtime checkpoint and last user confirmation separately, with refresh and an explanation that recovery actions follow in F03. Full dashboard/navigation, editable timeline and recovery controls are still queued.

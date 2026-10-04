@@ -4,16 +4,16 @@
 
 **Scope:** Local-first web MVP; React + TypeScript + Vite; IndexedDB
 
-**Current feature in progress:** None; F01 completed
+**Current feature in progress:** F02 — Manual sessions; F02.1–F02.6 completed
 
-**Recommended next step:** F02 — Manual work-session tracking
+**Recommended next step:** F02.7 — Feature verification and tracker update
 
 ## Current implementation status
 
 - **Implemented product features:** F01 — Persistent task management.
-- **In progress product features:** None.
+- **In progress product features:** F02 — Manual work-session tracking.
 - **Completed planning:** Web scope, architecture, persistence, component boundaries, tracking rules, UX, privacy and tracker revised.
-- **Implemented foundation:** React/TypeScript/Vite scaffold, task domain/service, IndexedDB Schema V1 and Tasks interface.
+- **Implemented foundation:** React/TypeScript/Vite scaffold, task domain/service, IndexedDB Schema V2, session record models and Tasks interface.
 - **Current blocker:** None. Node 24.4.1/npm 11.4.2 verified; web production build, type check, lint and browser smoke checks pass.
 
 The active project is web-only. Desktop source, packaging files, generated Swift build output and archived desktop specifications were removed at the user’s request.
@@ -50,9 +50,9 @@ Build one feature at a time. Update this file before moving on. Code presence is
 | --- | --- | --- | --- | --- |
 | M01 | Web documentation migration | Implemented | User-approved direction | Seven active specs and tracker revised; desktop specifications removed; no native toolchain dependency. Evidence: these documents and change log. |
 | W00 | Web scaffold | Implemented | M01 | React/TypeScript/Vite app launches locally; production build, type check and lint pass; logical layers, accessible welcome screen and setup README. Root project contains only the active web scaffold. |
-| T00 | Browser feasibility checks | Queued | W00 | Probe IndexedDB commits/abort, simultaneous tabs, owner death, suspension/reload, migrations, quota failure and offline shell. Run each check before relying on that capability; record browser results. |
-| F01 | Persistent tasks | Implemented | W00; storage T00 | Create/list/edit/complete/archive; three types, notes, optional progress and editable confirmation defaults; filters; reload restores data; save failures honest. |
-| F02 | Manual sessions | Queued | F01; multi-tab T00 | Start/Pause/Resume/Done/Switch; one open session across same-origin tabs; committed transaction before success; live elapsed display and basic history; no overlaps. |
+| T00 | Browser feasibility checks | In progress | W00 | Probe IndexedDB commits/abort, simultaneous tabs, owner death, suspension/reload, migrations, quota failure and offline shell. Run each check before relying on that capability; record browser results. |
+| F01 | Persistent tasks | Implemented | W00; storage T00 | Create/list/edit/complete/archive; three types, notes, previous hours and editable confirmation defaults; filters; reload restores data; save failures honest. |
+| F02 | Manual sessions | In progress | F01; multi-tab T00 | Start/Pause/Resume/Done/Switch; one open session across same-origin tabs; committed transaction before success; live elapsed display and basic history; no overlaps. |
 | F03 | Interrupted-session recovery | Queued | F02; lifecycle T00 | Orphaned/suspended runtime enters recovery; live second-tab owner not incorrectly recovered; defensible boundary/user correction; no silent resume or invented downtime. |
 | F04 | In-app prompt coordination | Queued | F03 | One actionable prompt, stale IDs/generations ignored, collision precedence, no guaranteed closed-tab/background delivery. |
 | F05 | Device-wide inactivity | Skipped | Native companion or validated future browser enhancement | Plain web MVP does not observe global keyboard/mouse activity. Page blur/inactivity must not pause work automatically. |
@@ -85,12 +85,24 @@ Do not implement tasks, sessions, IndexedDB business stores or full navigation a
 
 ## F01 — Persistent tasks, broken into steps
 
-- [x] Domain task/type/lifecycle and confirmation policy: trimmed name 1–200, optional progress 0–100, valid enabled intervals, duplicate names allowed.
+- [x] Domain task/type/lifecycle and confirmation policy: trimmed name 1–200, finite nonnegative previous hours, valid enabled intervals, duplicate names allowed.
 - [x] Versioned IndexedDB schema and typed task repository; transaction completion determines save success.
 - [x] TaskService create/edit/complete/archive; validation outside UI; stable UUID/timestamps; defaults copied at creation.
 - [x] Task list and editor with filters, empty/error states and accessible controls. Do not expose Start until F02.
 - [x] Domain and browser persistence checks: reload, failed saves, lifecycle/default isolation, invalid inputs and schema upgrades.
 - [x] Record source/validation evidence; mark implemented only after acceptance passes.
+
+## F02 — Smaller-step tracker
+
+| Step | Deliverable | Status | Evidence / remaining |
+| --- | --- | --- | --- |
+| F02.1 | Session models and database upgrade | Implemented | WorkSession, active-session marker and recovery evidence types; shared Schema V2 opener; V1 tasks preserved; migration/rollback/blocked-upgrade tests. No session write commands yet. |
+| F02.2 | Session engine and injectable clocks | Implemented | Serialized command pipeline, immutable subscriptions, injected clock, committed reads and conservative runtime elapsed. Production Start/Pause/Resume writer added in F02.3. |
+| F02.3 | Start/Pause/Resume | Implemented | Atomic session/marker/recovery writes; new session on Resume; task eligibility, overlap, identity/generation and owner checks; rollback and concurrent-tab Start tests pass. UI controls remain F02.6. |
+| F02.4 | Complete and Switch | Implemented | Atomic related record changes and failure handling; coordinate TaskService lifecycle with engine. |
+| F02.5 | Cross-tab single-session protection | Implemented | Ownership/generation rules, database invariant enforcement, stale command rejection and concurrent-tab tests. Singleton stores alone do not enforce this rule. |
+| F02.6 | Timer and basic history UI | Implemented | Start/Resume/Switch, Pause/Done, monotonic live timer, ended totals and persisted history; follower/recovery/error states; responsive browser workflows. |
+| F02.7 | Feature verification and tracker update | Queued | Transition/timing/race/failure tests; mark full F02 implemented only after all steps pass. |
 
 ## F02–F03 — Tracking foundation
 
@@ -143,3 +155,69 @@ Open implementation decisions: dependency versions; supported browser versions; 
 ### F01 review — 2026-10-04
 
 User approved the completed task-management feature and authorized committing/pushing it. All six F01 steps are complete; validation evidence is recorded above. F02 remains queued.
+
+### F02.1 evidence — 2026-10-04
+
+- Models: [work-session contracts](../src/domain/workSession.ts) define epoch timestamps, task identity, source/correction provenance, nullable paired end/reason, timezone, revision, active ownership marker and separate runtime/user-confirmed recovery evidence. Ended-duration and half-open overlap helpers do not invent open-session duration.
+- Persistence: [shared database opener](../src/persistence/database.ts) upgrades V1 to V2 with workSessions (taskId/startedAt indexes), activeSession and recovery stores. Tasks and status index remain unchanged. Task repository now uses the shared opener.
+- Verification: build/type check and lint pass; 33 domain/repository tests and 7 Chromium tests pass, including populated V1 migration, aborted migration rollback/retry, blocked upgrade retry, unchanged task fields and existing task workflow regression.
+- Tests: [session model tests](../src/domain/workSession.test.ts), [database tests](../src/persistence/database.test.ts), [browser migration test](../tests/migration.spec.ts). T00 migration probes complete for this schema; ownership/lifecycle/quota/offline probes remain outstanding.
+- Scope: no tracking controls, clock runtime, session mutations or live single-session enforcement added. F02 remains in progress; full recovery is F03. No automatic commit or push.
+- Next: F02.2 session engine/clock foundation.
+
+### F02.2 evidence — 2026-10-04
+
+- Foundation: [SessionEngine](../src/application/sessionEngine.ts), [clock contract](../src/domain/clock.ts), [BrowserClock](../src/infrastructure/browserClock.ts), [session reader/command contracts](../src/domain/sessionStore.ts), [IndexedDB session reader](../src/persistence/sessionReader.ts). The composition root constructs one engine; the Tasks UI does not dispatch tracking actions yet.
+- Engine queues commands/reads/observations, isolates subscriber failures, clones/freezes snapshots and queued command input, rejects invalid state/clocks and only publishes command results after handler commit. Rejected operations do not poison the queue.
+- Live elapsed is monotonic runtime duration, not accumulated ticks. Reloaded sessions cannot recreate an anchor. Existing foreign unexpired ownership is followed; ambiguous runtime, expired ownership or clock discontinuity requires recovery without mutating history.
+- [Timing decision](decisions/001-runtime-clock-foundation.md) records injectable initial gap/drift thresholds and their limits. No automatic polling, checkpoint writes or recovery dialog added.
+- Validation: production build/type check and lint pass; 51 domain/repository/engine tests and 7 Chromium task/migration regression tests pass. Engine tests use injected fake command handlers; they do not claim production Start/Pause/Resume implementation.
+- Limits: transaction-backed session writes are F02.3/F02.4; database-enforced cross-tab tracking ownership is F02.5; timer/history UI is F02.6; complete interruption recovery is F03. F02 remains in progress.
+- Next: F02.3 Start/Pause/Resume. No automatic commit or push performed.
+
+### F02.3 evidence — 2026-10-04
+
+- Production commands: [IndexedDBSessionCommands](../src/persistence/sessionCommands.ts) is wired to the SessionEngine in the composition root. Start/Resume validate active tasks and global history, then atomically insert an open session, owner marker and recovery evidence. Pause ends the identified session at command time and removes marker/evidence in the same transaction.
+- Resume requires prior ended tracked history and creates a fresh UUID; paused gaps are not included. Repeated/stale Pause, mismatched generation/owner, second Start, incomplete recovery evidence, invalid tasks and overlapping boundaries are rejected without successful state publication.
+- Integrity: task lifecycle updates share the workSessions transaction scope and refuse completion/archive of an open-session task until F02.4 supplies coordinated completion. No existing task record is silently changed by tracking.
+- Ownership: an initial 60-second lease is stored; no renewal/takeover/listener scheduling exists yet. Unique session identity plus generation protects stale Pause. Database readwrite scopes enforce a single open session even across independent tabs. Full cross-tab coordination remains F02.5 and interruption recovery F03.
+- Validation: production build/type check and lint pass; 62 unit/integration tests and 9 Chromium tests pass. Added tests cover discrete persisted sessions, excluded pause intervals, unsupported tasks, duplicate starts, stale actions, aborted Start/Pause rollback/retry, task lifecycle guard and backward-clock overlap. Chromium verifies real persisted command flow and simultaneous two-tab Starts.
+- Tests: [transactional command tests](../src/persistence/sessionCommands.test.ts), [browser command tests](../tests/sessionCommands.spec.ts). All browser data is isolated to test contexts.
+- Scope: no visible tracking controls or timer/history UI; Complete/Switch commands still explicitly unavailable. F02 remains in progress. No automatic commit or push performed.
+- Next: F02.4 Complete and Switch.
+
+
+### F02.4 — Complete and Switch implemented
+
+- Complete closes active work and completes its task in one transaction. TaskService in the production composition now routes completion through the engine, preserving task revision and session identity/generation checks.
+- Switch ends the previous session and starts the selected eligible task at the same boundary. Both commands reject stale actions, foreign ownership and unresolved confirmation evidence.
+- Failure tests verify that aborted Complete/Switch transactions preserve the original task, session, marker and recovery evidence. Completing another task preserves the running session.
+- Verification: 67 unit tests and 10 browser tests pass; lint, typecheck and production build pass.
+- Tracking controls/history UI remain F02.6; ownership renewal and coordination remain F02.5. F02 stays in progress. No commit or push performed.
+- Next: F02.5 — Cross-tab single-session protection.
+
+
+### F02.5 — Cross-tab single-session protection implemented
+
+- Transactions enforce one open session and validate owner, session identity, generation, lease and matching checkpoint evidence. Expired owners cannot renew or terminate tracking until explicit recovery.
+- Visible owner checkpoints run every 15 seconds, renewing the 60-second lease and updating recovery evidence atomically. They do not imply user confirmation or change history.
+- A disposable app coordinator uses BroadcastChannel change hints and periodic polling, including when channels are unavailable/restricted. Visibility, focus and page restoration reconcile immediately. Cleanup removes timers, listeners and channels.
+- Live followers never claim ownership or invent elapsed work. Expiry/runtime gaps preserve the session and require recovery; explicit recovery remains F03.
+- Verification: 74 unit tests pass; lint, typecheck and build pass. 11 browser tests passed before the final evidence-validation and channel-fallback hardening; permission for their final rerun was declined.
+- Next: F02.6 — visible tracking controls, elapsed display and basic session history. F02 remains in progress. No commit or push performed.
+
+
+### F02.6 — Timer and basic history UI implemented
+
+- Task cards expose Start or Resume when idle and Switch while another task runs. Current-session controls offer Pause and Done; archive is disabled for the open-session task. Actions report success only after the engine transaction commits.
+- A subscribed current-session card shows monotonic elapsed time refreshed once per second while visible. Followers show read-only state with unavailable elapsed; recovery preserves the interval and shows start, checkpoint and user-confirmation evidence separately.
+- Read-only session history includes task names, start/end timestamps with stored timezone, end reason, correction flag and ended duration. Overall/per-task totals exclude open intervals and paused gaps. History is reloaded on session transitions and tracking refresh; failed loads suppress totals and offer retry.
+- Empty/loading/error states, semantic timer/status regions, keyboard controls and a 375px responsive layout are implemented. Recovery actions and confirmation prompts are explicitly deferred to F03/F04.
+- Verification: 76 unit tests; 17 browser tests covering complete UI transitions, persistence after reload, live elapsed, read-only followers, failed Pause, expired ownership messaging and mobile overflow. Lint, typecheck and build pass; mobile screenshot visually reviewed.
+- Next: F02.7 — overall feature acceptance and tracker update. F02 remains in progress pending that step. No commit or push performed.
+
+### Accumulated hours update
+
+- Replaced task progress percentages with a previously worked hours starting balance. Total hours include ended sessions and known live elapsed time. Editing the balance preserves session history.
+- V3 migration removes legacy task progress and defaults previous hours to zero, preserving task lifecycle and session data.
+- Two presence triggers (periodic regardless of activity and inactivity) and shared grace behavior remain under discussion; reminder automation is not implemented.

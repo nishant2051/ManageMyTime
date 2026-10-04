@@ -87,3 +87,20 @@ input[type=checkbox] { width: 18px; height: 18px; }
   .tasks-main { padding: 32px 20px; }
 }
 @media (max-width: 420px) { .form-columns { grid-template-columns: 1fr; } dialog { padding: 20px; } }
+.tracking-panel { padding: 24px; margin: 0 0 28px; border: 1px solid #c7d0e3; border-radius: 14px; background: #edf2ff; }
+.tracking-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
+.tracking-heading h2 { margin: 0; font-size: 1.25rem; }
+.tracking-idle { color: #526078; line-height: 1.6; }
+.current-task { font-size: 1.375rem; font-weight: 700; overflow-wrap: anywhere; margin: 16px 0 8px; }
+.session-state { color: #334667; font-size: .9375rem; }
+.timer { font-size: clamp(1.5rem, 5vw, 2.75rem); font-weight: 650; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.session-detail { color: #526078; font-size: .875rem; line-height: 1.7; margin: 10px 0; }
+.tracking-actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; }
+.recovery-note { color: #60451b; background: #fff8e9; border: 1px solid #dbc69f; border-radius: 8px; padding: 0 16px; line-height: 1.6; }
+.session-history { margin-top: 36px; border-top: 1px solid #dee4f0; padding-top: 24px; }
+.session-list { list-style: none; padding: 0; display: grid; gap: 12px; }
+.session-row { display: flex; justify-content: space-between; gap: 20px; padding: 18px; border: 1px solid #dee4f0; border-radius: 10px; background: #fff; overflow-wrap: anywhere; }
+.session-row > div { min-width: 0; }
+.session-result { display: flex; flex-direction: column; gap: 6px; text-align: right; font-size: .875rem; color: #526078; flex-shrink: 0; }
+.session-result strong { color: #17213c; font-variant-numeric: tabular-nums; font-size: 1rem; }
+@media (max-width: 600px) { .tracking-panel { padding: 18px; } .session-row { flex-direction: column; gap: 8px; } .session-result { text-align: left; } }

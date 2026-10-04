@@ -8,6 +8,7 @@ export class TaskService {
     private readonly now: () => number = Date.now,
     private readonly id: () => string = () => crypto.randomUUID(),
     private readonly defaults: TaskDefaults = initialTaskDefaults,
+    private readonly completion?: (task: WorkTask) => Promise<void>,
   ) {}
   list() { return this.repository.list() }
   creationDefaults(): TaskDefaults { return structuredClone(this.defaults) }
@@ -25,6 +26,7 @@ export class TaskService {
     })
   }
   async complete(task: WorkTask): Promise<void> {
+    if (this.completion) return this.completion(task)
     await this.repository.update(task.id, task.revision, current => {
       if (current.status !== 'ready') throw new Error('Only active tasks can be completed.')
       const timestamp = this.now()

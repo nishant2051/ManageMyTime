@@ -14,10 +14,11 @@ export function TaskEditor({ task, defaults, onSave, onDismiss }: Props) {
   const [name, setName] = useState(task?.name ?? '')
   const [type, setType] = useState<TaskType>(task?.type ?? 'active')
   const [notes, setNotes] = useState(task?.notes ?? '')
-  const [progress, setProgress] = useState(task?.progressPercent?.toString() ?? '')
+  const [hours, setHours] = useState(task?.previousHours.toString() ?? '')
   const policy = task?.confirmation ?? defaults.active
   const [enabled, setEnabled] = useState(policy.enabled)
   const [interval, setInterval] = useState(String(policy.intervalMinutes))
+  const [inactivity, setInactivity] = useState(String(policy.inactivityMinutes))
   const [grace, setGrace] = useState(String(policy.graceMinutes))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -32,15 +33,15 @@ export function TaskEditor({ task, defaults, onSave, onDismiss }: Props) {
     // Existing tasks keep their policy; newly created tasks receive type defaults.
     if (!task) {
       const next = defaults[value]
-      setEnabled(next.enabled); setInterval(String(next.intervalMinutes)); setGrace(String(next.graceMinutes))
+      setEnabled(next.enabled); setInterval(String(next.intervalMinutes)); setGrace(String(next.graceMinutes)); setInactivity(String(next.inactivityMinutes))
     }
   }
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     setSaving(true); setError('')
     try {
-      await onSave({ name, type, notes, progressPercent: progress.trim() === '' ? null : Number(progress),
-        confirmation: { enabled, intervalMinutes: interval === '' ? NaN : Number(interval), graceMinutes: grace === '' ? NaN : Number(grace) } })
+      await onSave({ name, type, notes, previousHours: hours.trim() === '' ? 0 : Number(hours),
+        confirmation: { enabled, inactivityMinutes: inactivity === '' ? NaN : Number(inactivity), intervalMinutes: interval === '' ? NaN : Number(interval), graceMinutes: grace === '' ? NaN : Number(grace) } })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Task was not saved. Please retry.')
     } finally { setSaving(false) }
@@ -53,15 +54,18 @@ export function TaskEditor({ task, defaults, onSave, onDismiss }: Props) {
           <label>Task name<input ref={nameInput} name="name" value={name} onChange={e => setName(e.target.value)} required autoComplete="off" /></label>
           <label>Task type<select value={type} onChange={e => selectType(e.target.value as TaskType)}>{taskTypes.map(value => <option key={value} value={value}>{typeLabels[value]}</option>)}</select></label>
           <label>Notes <span className="optional">(optional)</span><textarea rows={3} value={notes} onChange={e => setNotes(e.target.value)} /></label>
-          <label>Progress (%) <span className="optional">(optional)</span><input type="number" min="0" max="100" step="1" value={progress} onChange={e => setProgress(e.target.value)} /></label>
+          <label>Previously worked hours <span className="optional">(optional)</span><input type="number" min="0" step="any" value={hours} onChange={e => setHours(e.target.value)} /></label>
+          <p className="hint">Enter hours worked before using this tracker. New sessions add to these hours automatically.</p>
           <details>
             <summary>Confirmation settings</summary>
             <p className="hint">Save your preferences for future reminders. Reminders are not available yet.</p>
             <label className="checkbox-label"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} /> Enable periodic confirmation</label>
             <div className="form-columns">
-              <label>Interval (minutes)<input type="number" min={enabled ? '0.01' : '0'} step="any" required value={interval} onChange={e => setInterval(e.target.value)} /></label>
+              <label>Periodic interval (minutes)<input type="number" min={enabled ? '0.01' : '0'} step="any" required value={interval} onChange={e => setInterval(e.target.value)} /></label>
+              <label>Inactivity interval (minutes)<input type="number" min="0.01" step="any" required value={inactivity} onChange={e => setInactivity(e.target.value)} /></label>
               <label>Grace period (minutes)<input type="number" min="0" step="any" required value={grace} onChange={e => setGrace(e.target.value)} /></label>
             </div>
+            <p className="hint">Periodic checks ask regardless of activity. Inactivity checks ask after no detected activity. Grace is the time allowed to answer. If unanswered, recorded time ends at the last activity or confirmation; inactivity and grace time are excluded.</p>
           </details>
         </fieldset>
         {error && <p className="error" role="alert">{error}</p>}
