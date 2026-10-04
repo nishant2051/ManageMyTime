@@ -4,16 +4,16 @@
 
 **Scope:** Local-first web MVP; React + TypeScript + Vite; IndexedDB
 
-**Current feature in progress:** F02 — Manual sessions; F02.1–F02.6 completed
+**Current feature in progress:** F03 — Interrupted-session recovery; controls implemented, awaiting manual feedback
 
-**Recommended next step:** F02.7 — Feature verification and tracker update
+**Recommended next step:** Manual feedback on interrupted-session recovery; no new automated tests per user request
 
 ## Current implementation status
 
 - **Implemented product features:** F01 — Persistent task management.
 - **In progress product features:** F02 — Manual work-session tracking.
 - **Completed planning:** Web scope, architecture, persistence, component boundaries, tracking rules, UX, privacy and tracker revised.
-- **Implemented foundation:** React/TypeScript/Vite scaffold, task domain/service, IndexedDB Schema V2, session record models and Tasks interface.
+- **Implemented foundation:** React/TypeScript/Vite scaffold, task domain/service, IndexedDB Schema V4, session record models and Tasks interface.
 - **Current blocker:** None. Node 24.4.1/npm 11.4.2 verified; web production build, type check, lint and browser smoke checks pass.
 
 The active project is web-only. Desktop source, packaging files, generated Swift build output and archived desktop specifications were removed at the user’s request.
@@ -53,10 +53,10 @@ Build one feature at a time. Update this file before moving on. Code presence is
 | T00 | Browser feasibility checks | In progress | W00 | Probe IndexedDB commits/abort, simultaneous tabs, owner death, suspension/reload, migrations, quota failure and offline shell. Run each check before relying on that capability; record browser results. |
 | F01 | Persistent tasks | Implemented | W00; storage T00 | Create/list/edit/complete/archive; three types, notes, previous hours and editable confirmation defaults; filters; reload restores data; save failures honest. |
 | F02 | Manual sessions | In progress | F01; multi-tab T00 | Start/Pause/Resume/Done/Switch; one open session across same-origin tabs; committed transaction before success; live elapsed display and basic history; no overlaps. |
-| F03 | Interrupted-session recovery | Queued | F02; lifecycle T00 | Orphaned/suspended runtime enters recovery; live second-tab owner not incorrectly recovered; defensible boundary/user correction; no silent resume or invented downtime. |
-| F04 | In-app prompt coordination | Queued | F03 | One actionable prompt, stale IDs/generations ignored, collision precedence, no guaranteed closed-tab/background delivery. |
+| F03 | Interrupted-session recovery | In progress | F02; lifecycle T00 | Suggested/custom end and confirmed discard implemented; live owners protected; user manual validation pending. |
+| F04 | In-app prompt coordination | In progress | F03 | One actionable prompt, stale IDs/generations ignored, collision precedence, no guaranteed closed-tab/background delivery. |
 | F05 | Device-wide inactivity | Skipped | Native companion or validated future browser enhancement | Plain web MVP does not observe global keyboard/mouse activity. Page blur/inactivity must not pause work automatically. |
-| F06 | Periodic confirmation | Queued | F04 | Per-task interval/grace; Yes continues; No/unanswered closes at due boundary when runtime is reliable; overdue prompts after suspension route through recovery. |
+| F06 | Presence confirmation | In progress | F04 | Periodic/app-inactivity/grace prompts implemented; Yes continues; No/unanswered closes at last activity/confirmation. Full recovery integration remains. |
 | F07 | App monitoring/associations | Skipped | Future native companion | Browser cannot implement the specified frontmost native-app monitoring/allowed-app list. |
 | F08 | Today todos | Queued | F01 | Flat dated todos, completion, optional notes/progress/estimate/deadline/task link; persistence and local-date validation. |
 | F09 | Planner | Queued | F04, F06, F08 | Task/break blocks; explicit switch/overrun choices; missed boundaries reconcile; plans independent of sessions. No dependency on skipped F07. |
@@ -114,7 +114,7 @@ Implement transactional session creation/end/switch/completion, injected clocks 
 | --- | --- | --- |
 | Native global activity, app associations, exact sleep/lock events and automatic activity classification | Skipped | Native/browser capability redesign required; manual controls are current authority. |
 | Optional browser Idle Detection | Skipped | Limited browser coverage; evaluate later with contextual permission and fallback. |
-| System notifications, push and guaranteed closed-tab reminders | Skipped | In-app prompts only; browser background execution cannot provide original native guarantee. |
+| Push and guaranteed closed-tab reminders | Skipped | Optional system notifications are implemented while the app executes; closed-tab and suspended delivery remain unguaranteed. |
 | Accounts/backend/cloud sync, team collaboration | Skipped | Local-first, single-profile MVP; separate security/sync design required. |
 | Subtasks, recurring schedules, calendar integrations, browser extensions, AI schedules, productivity scores | Skipped | Retained product non-goals. |
 | Automated backups and import/restore | Skipped | Explicit export is MVP portability; restore workflow requires its own validated design. |
@@ -221,3 +221,25 @@ User approved the completed task-management feature and authorized committing/pu
 - Replaced task progress percentages with a previously worked hours starting balance. Total hours include ended sessions and known live elapsed time. Editing the balance preserves session history.
 - V3 migration removes legacy task progress and defaults previous hours to zero, preserving task lifecycle and session data.
 - Two presence triggers (periodic regardless of activity and inactivity) and shared grace behavior remain under discussion; reminder automation is not implemented.
+
+### Presence prompts and alerts — 2026-10-04
+
+Implemented the user-requested prompt slice ahead of full F03 recovery. F04/F06 remain partial until recovery integration and overall acceptance are completed.
+
+- Periodic and app-inactivity schedules share one persisted prompt and grace deadline. Unanswered or declined prompts end at the captured last activity/confirmation cutoff, excluding the entire inactivity/grace interval.
+- Transactional prompt creation/answer handling checks session, owner, generation, prompt identity and grace; late Yes is timeout. Failed writes preserve open session/prompt for retry. Checkpoints remain runtime evidence, not activity.
+- Owner-only modal, countdown, Yes/Pause controls, permission-based system notifications, and optional audio chime with enable/test/mute. Denied notifications retain the popup. No forced overlay or device-wide activity detection.
+- Ordinary background execution is observed; suspension, reload and clock/lease uncertainty keep the existing recovery behavior instead of fabricating delivery or work. Recovery actions remain outstanding.
+- Validation: 82 unit tests and 24 browser tests pass, including timeout cutoffs, periodic checks with activity, stale/foreign answers, failed saves, suspension, duplicate-tab alerts, blocked notifications and sound controls. OS delivery is simulated in browser tests; real banners and audibility depend on browser/OS permissions. Mobile popup rendered and visually inspected. Typecheck, build and lint pass.
+
+### Chime playback repair — 2026-10-04
+
+Replaced the short, quiet oscillator with a bundled 1.8-second two-note WAV played through HTML audio at 80% volume. Playback requests are awaited and errors are shown; Enable/Test playback runs from a user gesture, and Mute stops active playback. UI distinguishes playback starting from confirmed audibility and points to tab/output volume when playback succeeds but cannot be heard. Verified 85 unit tests plus six presence browser tests using the installed Brave executable in an isolated test profile; successful tests inspect native media playback state/source, and denied playback stays off with a visible error. Physical speaker audibility and the user’s existing Brave permissions are outside those automated checks. Build/typecheck/lint pass.
+
+### Refresh tracking and recovery controls — 2026-10-04
+
+- Refresh tracking remains reconciliation/history reload, with visible refreshing state and explanation. It does not reset the timer or silently restart a session.
+- Added recovery-only engine command and transactional suggested/custom end or discard. End time is validated against start, current clock, and overlaps. Recovery records are marked corrected; owner/recovery cleanup commits with the session update/delete.
+- Protects live foreign owners, compares the expected owner/generation/checkpoint and session revision, and rejects stale recovery. Reloaded sessions may remain followers until the one-minute ownership lease expires. Missing evidence falls back to session start, not invented work.
+- UI displays activity/confirmation and runtime checkpoint separately, proposed duration, a local-time end input, and inline discard confirmation. Recovery leaves tracking idle for explicit Start/Resume.
+- Build/typecheck and lint passed. No automated tests were added or run in this slice, per user preference. Runtime acceptance awaits the user's manual feedback; existing test expectations/documented assertions may need later updates when automated testing resumes.

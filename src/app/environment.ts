@@ -1,3 +1,4 @@
+import { PresenceCoordinator } from '../infrastructure/presenceCoordinator'
 import { IndexedDBSessionHistory } from '../persistence/sessionHistory'
 import { SessionCoordinator } from '../infrastructure/sessionCoordinator'
 import { SessionEngine } from '../application/sessionEngine'
@@ -13,6 +14,7 @@ export interface AppEnvironment {
   readonly tasks: TaskService
   readonly sessions: SessionEngine
   readonly coordination: SessionCoordinator
+  readonly presence: PresenceCoordinator
   readonly history: IndexedDBSessionHistory
 }
 export function createAppEnvironment(): AppEnvironment {
@@ -24,5 +26,5 @@ export function createAppEnvironment(): AppEnvironment {
     const expectedSession = records.session?.taskId === task.id && records.active
       ? {sessionId:records.session.id,generation:records.active.generation} : null
     await sessions.dispatch({type:'complete',taskId:task.id,taskRevision:task.revision,expectedSession})
-  }), sessions, coordination: new SessionCoordinator(sessions), history: new IndexedDBSessionHistory(database) })
+  }), sessions, presence: new PresenceCoordinator(sessions), coordination: new SessionCoordinator(sessions), history: new IndexedDBSessionHistory(database) })
 }

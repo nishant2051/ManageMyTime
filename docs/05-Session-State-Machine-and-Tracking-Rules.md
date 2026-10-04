@@ -8,7 +8,7 @@
 
 ## States and invariants
 
-States: Idle, Running, AwaitingPeriodicConfirmation, Recovering and StorageUnavailable. Paused means the engine is Idle with a closed prior session; Resume always inserts a new session.
+States: Idle, Running, AwaitingConfirmation, Recovering and StorageUnavailable. Paused means the engine is Idle with a closed prior session; Resume always inserts a new session.
 
 Only one open WorkSession exists across tabs in one database. Engine commands serialize within a tab; IndexedDB transactions enforce invariants across tabs. First committed valid terminal transition wins. Late timer/prompt events cannot change an ended session. Persist before publishing success.
 
@@ -20,9 +20,9 @@ Only one open WorkSession exists across tabs in one database. Engine commands se
 | Pause | Idle, ended session | Command time, or earlier unresolved prompt boundary |
 | Switch | Close old/open new atomically | Command time; earlier uncertainty closes old conservatively and preserves any gap |
 | Done | Close session if active, complete task | Command time, or earlier unresolved boundary |
-| Confirmation due with available runtime | AwaitingPeriodicConfirmation | Capture due time and session/prompt/generation IDs |
+| Confirmation due with available runtime | AwaitingConfirmation | Capture delivery time, last activity/confirmation cutoff, and session/prompt/generation IDs |
 | Yes within grace | Running, same session | User confirms continuity; next interval starts from response |
-| No / grace timeout | Idle, ended session | Captured confirmation-due time |
+| No / grace timeout | Idle, ended session | Captured last detected app activity or explicit confirmation |
 | Prompt deadline already missed during suspension | Recovering | Do not invent a timely delivered prompt or count an expired interval automatically |
 | Orphaned open session on startup | Recovering | Last defensible confirmed boundary proposed to user |
 | Unexpected runtime gap / clock discontinuity | Recovering | Resolve ambiguity before counting the uncertain interval |
@@ -54,3 +54,13 @@ Planner events offer Switch, Continue or Break; never automatically change task/
 ## Required tests
 
 Start/Pause/Resume; accumulated multiple sessions; Done and switch transactions; duplicate-tab starts; failed writes/aborted switches; stale response and timer generation; confirmation Yes/No/timeout; overdue prompt after suspension; orphan recovery; live owner in another tab; clock jumps; startup during pending prompt; planner collision; overlap/cross-midnight corrections. Native inactivity/app-mismatch/sleep event tests are deferred with those features.
+
+## Presence prompts implementation (2026-10-04)
+
+Periodic checks depend on the last explicit confirmation, regardless of app activity. Inactivity checks depend on the most recent trusted interaction in the tracking tab or explicit confirmation. Start/Resume counts as initial confirmation. The earlier due check wins; ties select inactivity, and only one prompt is saved. Page visibility and runtime checkpoints are not user activity. Prompt creation captures the cutoff before prompting; incidental input while a prompt is pending does not extend it. Yes within grace confirms continuity and resets both schedules. Pause or timeout closes at the captured cutoff. A late Yes is processed as timeout. Terminal commands use a pending cutoff and clear its evidence; stale answers cannot affect a new session.
+
+The owner observes the clock and checks presence once per second, including ordinary background execution. Checkpoints can renew ownership while a prompt is pending. If the browser suspends execution or a clock/lease becomes uncertain, the engine requires recovery rather than inventing prompt delivery or automatically counting uncertain time. Recovery UI now offers explicit suggested/custom end and confirmed discard. Reload never recreates a live anchor, including when a prompt was pending.
+
+System notifications require explicit permission and return the user to the app for a response. Clicking or dismissing a system notification is not confirmation. Only the owner alerts; alerts are closed after resolution or interruption. Optional audio chimes are enabled/tested by a user gesture, muted independently, and off after reload. Browser/OS restrictions can prevent alerts; the in-app prompt remains authoritative.
+
+Recovery controls are available only after the engine identifies uncertain timing. The recovery commit checks session revision and expected owner/generation/checkpoint, rejects a foreign live owner, validates a supplied end time and overlaps, and atomically clears ownership/recovery. Suggested end uses the captured prompt cutoff or last activity/confirmation, never the runtime checkpoint. Local datetime input is interpreted in the current device timezone. Both suggested and custom recovery entries are marked corrected. Discard deletes only the unresolved open session after UI confirmation. Manual runtime validation is pending per the user’s no-new-tests preference.

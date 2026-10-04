@@ -36,6 +36,8 @@ export interface PendingConfirmationRecord {
   generation: number
   dueAt: number
   graceDeadlineAt: number
+  reason?: 'periodic' | 'inactivity'
+  cutoffAt?: number
 }
 
 /** Persisted recovery evidence; monotonic clock values do not survive reload. */
@@ -44,6 +46,7 @@ export interface SessionRecoveryRecord {
   sessionId: string
   lastRuntimeCheckpointAt: number
   lastUserConfirmedAt: number
+  lastActivityAt?: number
   pendingConfirmation: PendingConfirmationRecord | null
 }
 

@@ -169,7 +169,8 @@ export class SessionEngine {
     return this.serial(async () => {
       if (!this.commands) throw new SessionEngineError('commandUnavailable', 'Session actions will be enabled in the next tracking step.')
       if (this.state.mode === 'uninitialized') throw new SessionEngineError('invalidState', 'Load session state before issuing a command.')
-      if (this.state.mode === 'recoveryRequired') throw new SessionEngineError('recoveryRequired', 'Resolve the interrupted session before tracking again.')
+      if (captured.type === 'recover' && this.state.mode !== 'recoveryRequired') throw new SessionEngineError('invalidState', 'Refresh tracking before resolving an interrupted session.')
+      if (this.state.mode === 'recoveryRequired' && captured.type !== 'recover') throw new SessionEngineError('recoveryRequired', 'Resolve the interrupted session before tracking again.')
       const now = this.sample()
       if (this.state.mode === 'running') {
         const current = this.view(this.state.records, now)

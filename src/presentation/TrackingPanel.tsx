@@ -1,3 +1,5 @@
+import { RecoveryPanel } from './RecoveryPanel'
+import type { RecoveryResolution } from '../domain/sessionStore'
 import type { WorkTask } from '../domain/task'
 import type { SessionSnapshot } from '../application/sessionEngine'
 import type { WorkSession } from '../domain/workSession'
@@ -16,15 +18,18 @@ interface Props {
   error: string
   onPause: () => void
   onComplete: (task: WorkTask) => void
+  refreshing: boolean
+  onRecover: (resolution:RecoveryResolution) => Promise<void>
   onRefresh: () => void
 }
 
-export function TrackingPanel({snapshot,history,tasks,loading,busy,error,onPause,onComplete,onRefresh}: Props) {
+export function TrackingPanel({snapshot,history,tasks,loading,busy,error,onPause,onComplete,onRefresh,refreshing,onRecover}: Props) {
   const session = snapshot.records.session
   const task = tasks.find(task => task.id === session?.taskId)
   return <>
     <section className="tracking-panel" aria-labelledby="tracking-title">
-      <div className="tracking-heading"><h2 id="tracking-title">Current session</h2><button className="quiet" onClick={onRefresh} disabled={busy}>Refresh tracking</button></div>
+      <div className="tracking-heading"><h2 id="tracking-title">Current session</h2><button className="quiet" onClick={onRefresh} disabled={busy || refreshing}>{refreshing ? 'Refreshing…' : 'Refresh tracking'}</button></div>
+      <p className="hint">Refresh checks saved tracking state and updates history without restarting the timer.</p>
       {snapshot.mode === 'uninitialized' && <p>Loading tracking state…</p>}
       {snapshot.mode === 'idle' && <p className="tracking-idle">Ready when you are. Start a task below to track your work.</p>}
       {session && <>
@@ -34,11 +39,11 @@ export function TrackingPanel({snapshot,history,tasks,loading,busy,error,onPause
         <p className="session-detail">Started {timestamp(session.startedAt,session.timezone)} · {session.timezone}</p>
         {!loading && !error && <p className="session-detail">Total hours worked: {task ? formatDuration(workedTotal(task,history,snapshot)) : 'Unavailable'}</p>}
         {snapshot.mode === 'running' && <div className="tracking-actions"><button onClick={onPause} disabled={busy} aria-label={`Pause ${task?.name ?? 'session'}`}>Pause</button>{task && <button className="primary" disabled={busy} onClick={() => onComplete(task)} aria-label={`Done with ${task.name}`}>Done</button>}</div>}
-        {snapshot.mode === 'following' && <p className="hint">Use the tab that started this session to pause, switch or finish it.</p>}
-        {snapshot.mode === 'recoveryRequired' && <div className="recovery-note"><p>This session is preserved, but its elapsed time is uncertain. Refresh to check whether another tab still owns it.</p><p>Recovery actions are coming in the next feature. Starting another session is disabled until this interval is resolved.</p>{snapshot.records.recovery && <p>Last runtime checkpoint: {timestamp(snapshot.records.recovery.lastRuntimeCheckpointAt,session.timezone)}<br/>Last user confirmation: {timestamp(snapshot.records.recovery.lastUserConfirmedAt,session.timezone)}</p>}</div>}
+        {snapshot.mode === 'following' && <p className="hint">Use the tab that started this session to pause, switch or finish it. If that tab was closed or reloaded, wait up to a minute for its ownership to expire, then refresh tracking to recover.</p>}
+        {snapshot.mode === 'recoveryRequired' && <RecoveryPanel key={`${session.id}:${session.revision}`} snapshot={snapshot} busy={busy} onRecover={onRecover} />}
       </>}
       {error && <div className="error" role="alert"><p>{error}</p><button onClick={onRefresh} disabled={busy}>Retry tracking</button></div>}
-      <p className="hint">Manual tracking records the sessions you start and end. Reminders and interruption recovery are coming later.</p>
+      <p className="hint">Presence checks use the task’s periodic, inactivity and grace settings. Interrupted timing requires recovery.</p>
     </section>
   </>
 }

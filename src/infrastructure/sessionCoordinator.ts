@@ -30,7 +30,7 @@ export class SessionCoordinator {
     try {
       if (typeof BroadcastChannel !== 'undefined') channel = new BroadcastChannel('manage-my-time-session')
     } catch { /* Polling remains available when channels are restricted. */ }
-    const refresh = () => { if (document.visibilityState !== 'hidden') void this.refresh() }
+    const refresh = () => { void this.refresh() }
     // Receiving a hint reconciles only: it must not create a notification echo loop.
     const onMessage = (event: MessageEvent) => {
       if (event.data === 'changed') void this.engine.reconcile().catch(error => { this.error = error })

@@ -1,6 +1,7 @@
 import type { SessionCommand, SessionCommandContext, SessionCommandHandler, SessionRecords } from '../domain/sessionStore'
 import type { ActiveSessionRecord, SessionRecoveryRecord, WorkSession } from '../domain/workSession'
 import { sessionsOverlap, validateWorkSession } from '../domain/workSession'
+import { presenceDue } from '../application/presencePolicy'
 import type { WorkTask } from '../domain/task'
 import { SessionEngineError } from '../domain/sessionError'
 import { AppDatabase } from './database'
@@ -46,6 +47,32 @@ export class IndexedDBSessionCommands implements SessionCommandHandler {
           const recovery = (recoveryRequest.result as SessionRecoveryRecord | undefined) ?? null
           const tasks = tasksRequest.result as WorkTask[]
           if (open.length > 1) throw new SessionEngineError('recoveryRequired', 'Multiple open sessions require resolution before tracking.')
+          if (command.type === 'recover') {
+            const session = open[0]
+            if (!session || session.id !== command.sessionId || session.revision !== command.sessionRevision) throw new SessionEngineError('staleCommand', 'This session has changed. Refresh tracking before recovering it.')
+            if ((active && active.sessionId !== session.id) || (recovery && recovery.sessionId !== session.id)) throw new SessionEngineError('recoveryRequired', 'Session records disagree. Existing history has been preserved.')
+            const expected = command.expectedOwner
+            if (active ? !expected || active.ownerId !== expected.ownerId || active.generation !== expected.generation || active.lastRuntimeCheckpointAt !== expected.lastRuntimeCheckpointAt : expected !== null) {
+              throw new SessionEngineError('staleCommand', 'Tracking ownership changed. Refresh tracking and review the session again.')
+            }
+            if (active && active.ownerId !== context.ownerId && (!Number.isSafeInteger(active.leaseExpiresAt) || active.leaseExpiresAt > now)) {
+              throw new SessionEngineError('conflict', 'Another tab still owns this session. Wait for it to stop or close that tab, then refresh tracking.')
+            }
+            if (command.resolution.type === 'discard') {
+              tx.objectStore('workSessions').delete(session.id)
+            } else {
+              const endedAt = command.resolution.endedAt
+              if (!Number.isSafeInteger(endedAt) || endedAt < session.startedAt || endedAt > now) throw new SessionEngineError('validation', 'Choose an end time between the session start and now.')
+              const ended = validateWorkSession({...session,endedAt,endReason:'interruptedRecovery',wasCorrected:true,updatedAt:Math.max(now,session.updatedAt),revision:session.revision + 1})
+              if (history.some(other => other.id !== ended.id && sessionsOverlap(ended,other))) throw new SessionEngineError('conflict', 'This end time overlaps another recorded session. Choose an earlier time.')
+              tx.objectStore('workSessions').put(ended)
+            }
+            // Ending/discarding and releasing ownership commit together; never auto-resume.
+            tx.objectStore('activeSession').delete('active')
+            tx.objectStore('recovery').delete('active')
+            result = {session:null,active:null,recovery:null}
+            return
+          }
           if ((!open.length && (active || recovery)) || (open.length && (!active || !recovery ||
               active.key !== 'active' || recovery.key !== 'active' || active.sessionId !== open[0].id || recovery.sessionId !== open[0].id))) {
             throw new SessionEngineError('recoveryRequired', 'Session evidence is incomplete. Resolve it before changing history.')
@@ -57,11 +84,55 @@ export class IndexedDBSessionCommands implements SessionCommandHandler {
               !Number.isSafeInteger(recovery!.lastUserConfirmedAt) || recovery!.lastUserConfirmedAt < open[0].startedAt)) {
             throw new SessionEngineError('recoveryRequired', 'Invalid ownership evidence requires resolution before tracking.')
           }
+          if (command.type === 'activity' || command.type === 'presence' || command.type === 'answer') {
+            const session = open[0]
+            if (!session || session.id !== command.sessionId || active!.generation !== command.generation) throw new SessionEngineError('staleCommand', 'This presence check is no longer active.')
+            if (active!.ownerId !== context.ownerId) throw new SessionEngineError('conflict', 'Respond in the tab tracking this session.')
+            if (active!.leaseExpiresAt <= now || now < active!.lastRuntimeCheckpointAt) throw new SessionEngineError('recoveryRequired', 'Tracking was interrupted. Resolve uncertain time first.')
+            const task = tasks.find(task => task.id === session.taskId)
+            if (!task || task.status !== 'ready') throw new SessionEngineError('invalidState', 'The tracked task is unavailable.')
+            const evidence = {...recovery!}
+            const prompt = evidence.pendingConfirmation
+            if (command.type === 'answer') {
+              if (!prompt || prompt.promptId !== command.promptId || prompt.sessionId !== session.id || prompt.generation !== active!.generation) throw new SessionEngineError('staleCommand', 'This prompt has already changed.')
+              if (command.answer === 'timeout' && now < prompt.graceDeadlineAt) throw new SessionEngineError('validation', 'The grace period has not ended.')
+              if (command.answer === 'continue' && now < prompt.graceDeadlineAt) {
+                evidence.lastUserConfirmedAt = now
+                evidence.lastActivityAt = now
+                evidence.pendingConfirmation = null
+              } else {
+                const cutoff = prompt.cutoffAt ?? evidence.lastUserConfirmedAt
+                if (!Number.isSafeInteger(cutoff) || cutoff < session.startedAt || cutoff > prompt.dueAt || prompt.dueAt > now) throw new SessionEngineError('validation', 'Invalid presence cutoff.')
+                const ended = validateWorkSession({...session, endedAt:cutoff, endReason:command.answer === 'pause' ? 'userPaused' : 'confirmationTimeout', updatedAt:now, revision:session.revision + 1})
+                if (history.some(other => other.id !== ended.id && sessionsOverlap(ended, other))) throw new SessionEngineError('conflict', 'Presence cutoff overlaps history.')
+                tx.objectStore('workSessions').put(ended)
+                tx.objectStore('activeSession').delete('active')
+                tx.objectStore('recovery').delete('active')
+                result = {session:null,active:null,recovery:null}
+                return
+              }
+            } else if (command.type === 'activity') {
+              // A pending prompt requires an explicit answer; incidental movement is not confirmation.
+              if (!Number.isSafeInteger(command.activityAt) || command.activityAt < session.startedAt || command.activityAt > now) throw new SessionEngineError('validation', 'Invalid activity timestamp.')
+              if (!prompt) evidence.lastActivityAt = Math.max(command.activityAt, evidence.lastActivityAt ?? evidence.lastUserConfirmedAt)
+            } else if (!prompt) {
+              const due = presenceDue(task.confirmation, evidence, now)
+              if (due) evidence.pendingConfirmation = {promptId:this.id(),sessionId:session.id,generation:active!.generation,dueAt:now,
+                graceDeadlineAt:now + Math.round(task.confirmation.graceMinutes * 60000), reason:due,
+                cutoffAt:Math.max(evidence.lastActivityAt ?? evidence.lastUserConfirmedAt, evidence.lastUserConfirmedAt)}
+            }
+            evidence.lastRuntimeCheckpointAt = now
+            const marker = {...active!, lastRuntimeCheckpointAt:now, leaseExpiresAt:now + initialSessionLeaseMilliseconds}
+            tx.objectStore('recovery').put(evidence)
+            tx.objectStore('activeSession').put(marker)
+            result = {session,active:marker,recovery:evidence}
+            return
+          }
           if (command.type === 'checkpoint') {
             const session = open[0]
             if (!session || session.id !== command.sessionId || active!.generation !== command.generation) throw new SessionEngineError('staleCommand', 'Session ownership has changed.')
             if (active!.ownerId !== context.ownerId) throw new SessionEngineError('conflict', 'This session belongs to another runtime.')
-            if (active!.leaseExpiresAt <= now || now < active!.lastRuntimeCheckpointAt || recovery!.pendingConfirmation) throw new SessionEngineError('recoveryRequired', 'Resolve interrupted tracking before renewing ownership.')
+            if (active!.leaseExpiresAt <= now || now < active!.lastRuntimeCheckpointAt ) throw new SessionEngineError('recoveryRequired', 'Resolve interrupted tracking before renewing ownership.')
             const marker = {...active!,leaseExpiresAt:now + initialSessionLeaseMilliseconds,lastRuntimeCheckpointAt:now}
             const evidence = {...recovery!,lastRuntimeCheckpointAt:now}
             tx.objectStore('activeSession').put(marker)
@@ -91,10 +162,10 @@ export class IndexedDBSessionCommands implements SessionCommandHandler {
             }
             if (active!.ownerId !== context.ownerId) throw new SessionEngineError('conflict', 'This session belongs to another runtime.')
             if (active!.leaseExpiresAt <= now || now < active!.lastRuntimeCheckpointAt) throw new SessionEngineError('recoveryRequired', 'Session ownership expired. Resolve interrupted tracking first.')
-            if (recovery!.pendingConfirmation) throw new SessionEngineError('recoveryRequired', 'Resolve the pending confirmation before ending this session.')
+
             const task = tasks.find(task => task.id === session.taskId)
             if (!task || task.status !== 'ready') throw new SessionEngineError('invalidState', 'The active session does not have an eligible task.')
-            const ended = validateWorkSession({...session, endedAt:now, endReason:command.type === 'pause' ? 'userPaused' : command.type === 'switch' ? 'taskSwitched' : 'taskCompleted', updatedAt:now, revision:session.revision + 1})
+            const ended = validateWorkSession({...session, endedAt:recovery!.pendingConfirmation ? recovery!.pendingConfirmation.cutoffAt ?? recovery!.lastUserConfirmedAt : now, endReason:command.type === 'pause' ? 'userPaused' : command.type === 'switch' ? 'taskSwitched' : 'taskCompleted', updatedAt:now, revision:session.revision + 1})
             if (history.some(other => other.id !== ended.id && sessionsOverlap(ended, other))) {
               throw new SessionEngineError('conflict', 'This end time would overlap existing work history.')
             }
@@ -117,7 +188,7 @@ export class IndexedDBSessionCommands implements SessionCommandHandler {
             tx.objectStore('recovery').delete('active')
             if (command.type === 'complete') tx.objectStore('tasks').put({...completingTask!,status:'completed',completedAt:now,updatedAt:now,revision:completingTask!.revision + 1})
             result = {session:null, active:null, recovery:null}
-          } else {
+          } else if (command.type === 'start' || command.type === 'resume') {
             if (open.length) throw new SessionEngineError('conflict', 'Pause the active session before starting another task.')
             const task = tasks.find(task => task.id === command.taskId)
             if (!task || task.status !== 'ready') throw new SessionEngineError('validation', 'Choose an existing active task to track.')

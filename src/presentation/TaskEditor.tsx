@@ -58,7 +58,7 @@ export function TaskEditor({ task, defaults, onSave, onDismiss }: Props) {
           <p className="hint">Enter hours worked before using this tracker. New sessions add to these hours automatically.</p>
           <details>
             <summary>Confirmation settings</summary>
-            <p className="hint">Save your preferences for future reminders. Reminders are not available yet.</p>
+            <p className="hint">Presence checks run while tracking. Inactivity refers to interactions in this app; it cannot detect work in other applications.</p>
             <label className="checkbox-label"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} /> Enable periodic confirmation</label>
             <div className="form-columns">
               <label>Periodic interval (minutes)<input type="number" min={enabled ? '0.01' : '0'} step="any" required value={interval} onChange={e => setInterval(e.target.value)} /></label>

@@ -286,3 +286,95 @@ describe('expired owner reconciliation', () => {
     expect((await history())[0].endedAt).toBeNull()
   })
 })
+
+
+describe('presence confirmation boundaries', () => {
+  const target = {sessionId:'session-1',generation:1}
+  async function presenceSetup() {
+    const state = await setup()
+    const task = (await state.tasks.list())[0]
+    await state.tasks.edit(task,{...task,confirmation:{enabled:true,intervalMinutes:0.1,inactivityMinutes:0.05,graceMinutes:0.05}})
+    await state.engine.dispatch({type:'start',taskId:'task-1'})
+    function advance(milliseconds:number) {state.time.wallTime += milliseconds;state.time.monotonicTime += milliseconds}
+    return {...state,advance}
+  }
+  it('excludes the full inactivity interval and grace on timeout', async () => {
+    const {engine,advance,time,history} = await presenceSetup()
+    advance(1000)
+    await engine.dispatch({type:'activity',...target,activityAt:time.wallTime})
+    advance(3000)
+    const pending = (await engine.dispatch({type:'presence',...target})).records.recovery!.pendingConfirmation!
+    expect(pending).toMatchObject({reason:'inactivity',cutoffAt:2000,dueAt:5000,graceDeadlineAt:8000})
+    advance(3000)
+    expect((await engine.dispatch({type:'answer',...target,promptId:pending.promptId,answer:'timeout'})).mode).toBe('idle')
+    expect((await history())[0]).toMatchObject({startedAt:1000,endedAt:2000,endReason:'confirmationTimeout'})
+  })
+  it('periodic checks still fire with continuous activity and Yes resets both intervals', async () => {
+    const {engine,advance,time} = await presenceSetup()
+    for(let i=0;i<6;i++) {advance(1000); await engine.dispatch({type:'activity',...target,activityAt:time.wallTime})}
+    const pending = (await engine.dispatch({type:'presence',...target})).records.recovery!.pendingConfirmation!
+    expect(pending.reason).toBe('periodic')
+    advance(1000)
+    const continued = await engine.dispatch({type:'answer',...target,promptId:pending.promptId,answer:'continue'})
+    expect(continued.records.recovery).toMatchObject({lastUserConfirmedAt:8000,lastActivityAt:8000,pendingConfirmation:null})
+    expect(continued.elapsedMilliseconds).toBe(7000)
+    advance(2999)
+    expect((await engine.dispatch({type:'presence',...target})).records.recovery!.pendingConfirmation).toBeNull()
+  })
+  it('does not dismiss or extend a prompt on incidental activity or checkpoint', async () => {
+    const {engine,advance,time} = await presenceSetup()
+    advance(3000)
+    const pending = (await engine.dispatch({type:'presence',...target})).records.recovery!.pendingConfirmation!
+    advance(1000)
+    await engine.dispatch({type:'activity',...target,activityAt:time.wallTime})
+    const checkpoint = await engine.dispatch({type:'checkpoint',...target})
+    expect(checkpoint.records.recovery!.pendingConfirmation).toEqual(pending)
+    expect(checkpoint.records.recovery!.lastUserConfirmedAt).toBe(1000)
+  })
+  it('late Yes cannot retain grace time and stale answers cannot affect resumed sessions', async () => {
+    const {engine,advance,history} = await presenceSetup()
+    advance(3000)
+    const pending = (await engine.dispatch({type:'presence',...target})).records.recovery!.pendingConfirmation!
+    advance(3000)
+    await engine.dispatch({type:'answer',...target,promptId:pending.promptId,answer:'continue'})
+    expect((await history())[0].endedAt).toBe(1000)
+    await engine.dispatch({type:'resume',taskId:'task-1'})
+    await expect(engine.dispatch({type:'answer',...target,promptId:pending.promptId,answer:'continue'})).rejects.toMatchObject({code:'staleCommand'})
+  })
+  it('rejects a foreign answer and early timeout, then explicit Pause uses the cutoff', async () => {
+    const {engine,commands,advance,time,history} = await presenceSetup()
+    advance(3000)
+    const pending = (await engine.dispatch({type:'presence',...target})).records.recovery!.pendingConfirmation!
+    const answer = {type:'answer' as const,...target,promptId:pending.promptId,answer:'timeout' as const}
+    await expect(commands.commit(answer,{ownerId:'other',clock:time})).rejects.toMatchObject({code:'conflict'})
+    await expect(engine.dispatch(answer)).rejects.toMatchObject({code:'validation'})
+    await engine.dispatch({...answer,answer:'pause'})
+    expect((await history())[0]).toMatchObject({endedAt:1000,endReason:'userPaused'})
+  })
+  it('a failed timeout transaction preserves the prompt and open session for retry', async () => {
+    const {engine,advance,history} = await presenceSetup()
+    advance(3000)
+    const pending = (await engine.dispatch({type:'presence',...target})).records.recovery!.pendingConfirmation!
+    advance(3000)
+    const original = IDBObjectStore.prototype.delete
+    vi.spyOn(IDBObjectStore.prototype,'delete').mockImplementation(function(this:IDBObjectStore,key:IDBValidKey | IDBKeyRange) {
+      const request=original.call(this,key)
+      if(this.name === 'recovery') this.transaction.abort()
+      return request
+    })
+    const answer = {type:'answer' as const,...target,promptId:pending.promptId,answer:'timeout' as const}
+    await expect(engine.dispatch(answer)).rejects.toMatchObject({code:'storageUnavailable'})
+    expect((await history())[0].endedAt).toBeNull()
+    expect(engine.getSnapshot().records.recovery!.pendingConfirmation).toEqual(pending)
+    vi.restoreAllMocks()
+    await engine.dispatch(answer)
+    expect((await history())[0].endedAt).toBe(1000)
+  })
+  it('suspension requires recovery without creating a fictional timely prompt', async () => {
+    const {engine,advance,history} = await presenceSetup()
+    advance(61000)
+    await expect(engine.dispatch({type:'presence',...target})).rejects.toMatchObject({code:'recoveryRequired'})
+    expect(engine.getSnapshot().records.recovery!.pendingConfirmation).toBeNull()
+    expect((await history())[0].endedAt).toBeNull()
+  })
+})

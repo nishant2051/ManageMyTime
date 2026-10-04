@@ -20,14 +20,14 @@ it('polls without BroadcastChannel and cleans up timers and lifecycle listeners'
   expect(reconcile).toHaveBeenCalledTimes(2)
   documentTarget.visibilityState='hidden'
   await vi.advanceTimersByTimeAsync(15_000)
-  expect(reconcile).toHaveBeenCalledTimes(2)
+  expect(reconcile).toHaveBeenCalledTimes(3)
   documentTarget.visibilityState='visible';documentTarget.dispatchEvent(new Event('visibilitychange'))
   await coordinator.refresh()
-  expect(reconcile).toHaveBeenCalledTimes(3)
+  expect(reconcile).toHaveBeenCalledTimes(4)
   stop()
   await vi.advanceTimersByTimeAsync(30_000)
   windowTarget.dispatchEvent(new Event('focus'))
-  expect(reconcile).toHaveBeenCalledTimes(3)
+  expect(reconcile).toHaveBeenCalledTimes(4)
   expect(unsubscribe).toHaveBeenCalledOnce()
 })
 

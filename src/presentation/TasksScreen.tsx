@@ -1,3 +1,4 @@
+import { PresencePanel } from './PresencePanel'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppEnvironment } from '../app/environment'
 import type { TaskInput, TaskStatus, WorkTask } from '../domain/task'
@@ -5,7 +6,7 @@ import { typeLabels } from '../domain/task'
 import { TrackingPanel, SessionHistory } from './TrackingPanel'
 import { useSessionTracking } from './useSessionTracking'
 import { workedTotal, formatDuration } from './sessionDisplay'
-import type { SessionCommand } from '../domain/sessionStore'
+import type { RecoveryResolution, SessionCommand } from '../domain/sessionStore'
 import { TaskEditor } from './TaskEditor'
 
 const filters: {value: TaskStatus; label: string}[] = [
@@ -72,6 +73,23 @@ export function TasksScreen({ environment }: {environment: AppEnvironment}) {
       await environment.sessions.reconcile().catch(() => undefined)
     } finally { setBusy(null) }
   }
+  async function recover(resolution:RecoveryResolution) {
+    if (!session || mode !== 'recoveryRequired') throw new Error('Refresh tracking before recovering a session.')
+    const active = tracking.snapshot.records.active
+    setBusy(session.taskId); setNotice(''); setError('')
+    try {
+      await environment.sessions.dispatch({type:'recover',sessionId:session.id,sessionRevision:session.revision,
+        expectedOwner:active ? {ownerId:active.ownerId,generation:active.generation,lastRuntimeCheckpointAt:active.lastRuntimeCheckpointAt} : null,resolution})
+      setNotice(resolution.type === 'discard' ? 'Interrupted session discarded. You can start tracking again.' : 'Recovered session saved. Resume when you are ready.')
+      await Promise.all([reload(),tracking.reload()])
+    } catch (cause) {
+      const current = await environment.sessions.reconcile().catch(() => environment.sessions.getSnapshot())
+      if (current.mode !== 'recoveryRequired' || current.records.session?.id !== session.id || current.records.session.revision !== session.revision) {
+        setError(cause instanceof Error ? cause.message : 'Recovery was not saved. Refresh tracking and retry.')
+      }
+      throw cause
+    } finally { setBusy(null) }
+  }
   function pause() {
     if (session && tracking.snapshot.records.active) void track({type:'pause',sessionId:session.id,generation:tracking.snapshot.records.active.generation},session.taskId)
   }
@@ -113,7 +131,8 @@ export function TasksScreen({ environment }: {environment: AppEnvironment}) {
       <main className="tasks-main">
         <section className="tasks-workspace" aria-labelledby="tasks-title">
           <div className="page-heading"><div><p className="eyebrow">Make room for what matters</p><h1 id="tasks-title">Tasks</h1><p className="intro">Keep your ongoing work in one place.</p></div><button className="primary" disabled={loading || !!error} onClick={e => openEditor(null, e.currentTarget)}>Create task</button></div>
-          <TrackingPanel snapshot={tracking.snapshot} history={tracking.history} tasks={tasks} loading={tracking.loading} busy={busy !== null} error={error ? '' : tracking.error} onPause={pause} onComplete={task => {void action(task,'complete')}} onRefresh={() => {void tracking.refresh()}} />
+          <TrackingPanel snapshot={tracking.snapshot} history={tracking.history} tasks={tasks} loading={tracking.loading} busy={busy !== null} error={error ? '' : tracking.error} onPause={pause} onComplete={task => {void action(task,'complete')}} refreshing={tracking.refreshing} onRecover={recover} onRefresh={() => {void tracking.refresh()}} />
+          <PresencePanel environment={environment} snapshot={tracking.snapshot} tasks={tasks} />
           <div className="list-toolbar"><div className="filters" aria-label="Task filters">{filters.map(item => <button key={item.value} aria-pressed={filter === item.value} onClick={() => {setFilter(item.value); setNotice('')}}>{item.label} <span>{tasks.filter(task => task.status === item.value).length}</span></button>)}</div><button className="quiet" onClick={() => {void reload()}} disabled={loading}>Refresh list</button></div>
           <p className="status-message" role="status">{loading ? 'Loading tasks…' : notice}</p>
           {error && <div className="error" role="alert"><p>{error}</p><button onClick={() => {void reload()}}>Retry loading</button></div>}
@@ -123,7 +142,7 @@ export function TasksScreen({ environment }: {environment: AppEnvironment}) {
             {task.status !== 'archived' && <div className="task-actions">{task.status === 'ready' && session?.taskId !== task.id && <button className="primary" disabled={busy !== null || !canTrack} onClick={() => startTask(task)} aria-label={`${mode === 'running' ? 'Switch to' : tracking.history.some(item => item.taskId === task.id && item.endedAt !== null && item.creationSource === 'tracked') ? 'Resume' : 'Start'} ${task.name}`}>{mode === 'running' ? 'Switch to' : tracking.history.some(item => item.taskId === task.id && item.endedAt !== null && item.creationSource === 'tracked') ? 'Resume' : 'Start'}</button>}<button disabled={busy !== null} onClick={e => openEditor(task, e.currentTarget)} aria-label={`Edit ${task.name}`}>Edit</button>{task.status === 'ready' && <button disabled={busy !== null || mode === 'uninitialized' || mode === 'recoveryRequired' || (session?.taskId === task.id && mode !== 'running')} onClick={() => {void action(task, 'complete')}} aria-label={`Complete ${task.name}`}>Complete</button>}<button disabled={busy !== null || session?.taskId === task.id} onClick={() => {void action(task, 'archive')}} aria-label={`Archive ${task.name}`}>Archive</button></div>}
           </li>)}</ul>
           <SessionHistory history={tracking.history} tasks={tasks} loading={tracking.loading} error={tracking.error} />
-          <aside className="storage-note"><strong>Saved in this browser.</strong> Tasks stay on this device and site. Clearing site data can remove them. Sessions stay here too. Reminders, recovery actions and export are coming in later steps.</aside>
+          <aside className="storage-note"><strong>Saved in this browser.</strong> Tasks stay on this device and site. Clearing site data can remove them. Sessions stay here too. Resolve interrupted sessions above before starting again. Export is coming in a later step.</aside>
         </section>
       </main>
       {editor && <TaskEditor task={editor.task} defaults={defaults} onSave={save} onDismiss={closeEditor} />}
